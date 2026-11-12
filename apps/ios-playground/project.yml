@@ -1,0 +1,72 @@
+# The native iOS playground, generated with XcodeGen: `./generate.sh` writes
+# NativePlayground.xcodeproj (git-ignored, build output) from this file.
+name: NativePlayground
+
+options:
+  bundleIdPrefix: com.groundcover
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+# The SDK from source, as an app adds it through SwiftPM. Its engine copy is git-ignored and
+# written by scripts/vendor-engine.mjs; build after running it.
+packages:
+  GroundcoverRum:
+    path: ../../packages/ios
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0.0"
+    CURRENT_PROJECT_VERSION: "1"
+
+targets:
+  NativePlayground:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.groundcover.nativeplayground
+        PRODUCT_NAME: NativePlayground
+        INFOPLIST_FILE: Sources/Info.plist
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_STYLE: Automatic
+        # The environment, read from Info.plist at launch. The defaults point at the mock ingest
+        # the e2e suite runs on :9393, which a simulator reaches as localhost. Override them on
+        # the xcodebuild command line for a device run (README).
+        GC_DSN: http://localhost:9393
+        GC_API_KEY: e2e-key
+        GC_PRESET: ""
+        GC_RELEASE_ID: 1.0.0
+        GC_DEBUG: ""
+    dependencies:
+      - package: GroundcoverRum
+        product: GroundcoverRum
+      - package: GroundcoverRum
+        product: GroundcoverRumSwiftLog
+
+  # The locator contract: every label and test id the shared suite locates, found on the real
+  # screens. A rename fails it before it fails a device run.
+  NativePlaygroundUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: UITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.groundcover.nativeplayground.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: NativePlayground
+    dependencies:
+      - target: NativePlayground
+
+schemes:
+  NativePlayground:
+    build:
+      targets:
+        NativePlayground: all
+    test:
+      targets:
+        - NativePlaygroundUITests

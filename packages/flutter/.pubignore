@@ -1,0 +1,46 @@
+# What `dart pub publish` leaves out. When this file exists pub reads it INSTEAD of
+# .gitignore in this directory, so it repeats .gitignore minus the vendored engine:
+# git ignores that copy, but the published package must carry it (pub has no pack
+# hook to write it). Keep the two in step.
+
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+# Libraries should not include pubspec.lock, per https://dart.dev/guides/libraries/private-files#pubspeclock.
+/pubspec.lock
+**/doc/api/
+.dart_tool/
+.flutter-plugins-dependencies
+/build/
+/coverage/
+
+# Development only, never shipped: the tests (several read fixtures from
+# outside this package, so they can't run from the published archive), the
+# Pigeon input and the framework-widget generator. Their outputs under lib/,
+# android/ and ios/ ship.
+/test/
+/tool/
+/pigeons/

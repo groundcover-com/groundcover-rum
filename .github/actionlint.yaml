@@ -1,0 +1,12 @@
+# Blacksmith's runner labels are not GitHub-hosted ones, so actionlint's
+# runner-label rule rejects every `runs-on:` in this repo without this file.
+# Declared here so `actionlint .github/workflows/*.yml` is usable as a
+# pre-merge check.
+#
+# Keep in sync with the labels actually in use; a typo'd label does not fail a
+# run, it queues the job forever waiting for a runner that will never claim it.
+self-hosted-runner:
+  labels:
+    - blacksmith-16vcpu-ubuntu-2404
+    - blacksmith-16vcpu-ubuntu-2204
+    - blacksmith-12vcpu-macos-latest

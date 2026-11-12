@@ -1,0 +1,50 @@
+{
+  "exclude": ["dist", "node_modules", "src/**/*.test.ts", "src/**/*.test.tsx", "src/test-utils/**/*"],
+  "include": ["./src/**/*"],
+  "compilerOptions": {
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "target": "ES2020",
+    "jsx": "react-jsx",
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    // Parity with packages/core/ts/tsconfig.json: checked no less strictly than the
+    // core it composes.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+
+    "moduleResolution": "bundler",
+    "module": "esnext",
+    "outDir": "dist",
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+    "noEmit": true,
+
+    // No "dom"/"dom.iterable": React Native has no DOM. The RN globals the SDK
+    // legitimately uses (fetch, XMLHttpRequest, FileReader, console, setTimeout)
+    // come from react-native's own ambient type declarations, and the eslint
+    // config bans the DOM-only ones (window/document/navigator/URL/...) so a
+    // stray reference fails lint rather than compiling against a phantom global.
+    "lib": ["es2022"],
+    // "node" is here for TYPES ONLY — it supplies the ambient globals core's
+    // source references (TextEncoder, ReadableStream, console.assert), which RN
+    // provides at runtime (Hermes ≥0.74) but react-native's types don't declare.
+    // It also pulls process/Buffer into scope, so eslint.config.mjs bans those
+    // (and the DOM globals) at the usage level — the two are one gate.
+    "types": ["react", "react-native", "node"],
+
+    "paths": {
+      "@/*": ["./src/*"],
+      "@groundcover/rum-core": ["../core/ts/src/index.ts"],
+      "@groundcover/rum-core/*": ["../core/ts/src/*"]
+    }
+  }
+}

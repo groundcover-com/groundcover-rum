@@ -1,0 +1,10 @@
+root = true
+
+# Kotlin style, read by ktlint (packages/android's ktlintCheck, in Native Android CI) and by
+# editors. Android Studio's conventions at the repo's 100 columns, as the Swift side's
+# .swift-format.
+[*.{kt,kts}]
+ktlint_code_style = android_studio
+max_line_length = 100
+# Composables are named like types (GroundcoverNavigationEffect), as Compose's own are.
+ktlint_function_naming_ignore_when_annotated_with = Composable

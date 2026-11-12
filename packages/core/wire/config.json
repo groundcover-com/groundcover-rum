@@ -1,0 +1,20 @@
+{
+  "dsn": "ingest.golden.example",
+  "apiKey": "golden-api-key",
+  "cluster": "golden-cluster",
+  "environment": "golden-env",
+  "namespace": "golden-namespace",
+  "releaseId": "golden-release",
+  "appId": "golden-app",
+  "user": {
+    "id": "user-1",
+    "email": "user@example.com"
+  },
+  "options": {
+    "debug": false,
+    "transport": {
+      "batchSize": 0,
+      "compression": false
+    }
+  }
+}

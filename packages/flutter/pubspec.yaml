@@ -1,0 +1,49 @@
+name: groundcover_rum
+description: >-
+  groundcover Real User Monitoring (RUM) for Flutter on iOS and Android:
+  sessions, network and tracing, screens, taps, errors, logs, native crashes,
+  hangs, app start, frame vitals.
+version: 0.0.1-rc.1
+homepage: https://docs.groundcover.com/investigate/real-user-monitoring-rum
+topics:
+  - monitoring
+  - observability
+  - rum
+  - tracing
+
+environment:
+  # 3.44 is the oldest Flutter the native build files work on:
+  # they are the 3.47 template, which relies on Flutter applying kotlin-android
+  # itself and on the FlutterFramework Swift package, both new in 3.44.
+  # Flutter 3.44 ships Dart 3.12 (flutter_lints 6 needs 3.8).
+  sdk: ">=3.12.0 <4.0.0"
+  flutter: ">=3.44.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # The Pigeon bindings in lib/src/platform import it. Loose, since Flutter pins
+  # its own version and the bindings use only long-standing annotations.
+  meta: ^1.15.0
+
+dev_dependencies:
+  # Fake timers for the pipeline's batch timer; the version flutter_test pins.
+  fake_async: ^1.3.3
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  # The network tests drive package:http's IOClient, the most common dart:io
+  # client, through the capture override.
+  http: ^1.6.0
+  # Generates the host API in lib/src/platform, android/ and ios/ from
+  # pigeons/rum_api.dart: dart run pigeon --input pigeons/rum_api.dart
+  pigeon: ^29.0.6
+
+flutter:
+  plugin:
+    platforms:
+      android:
+        package: com.groundcover.rum.flutter
+        pluginClass: GroundcoverFlutterPlugin
+      ios:
+        pluginClass: GroundcoverFlutterPlugin

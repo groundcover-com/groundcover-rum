@@ -1,0 +1,18 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Declared by the library, not left to the app: the SDK sends over the network, and an
+         app that makes no requests of its own may not hold INTERNET. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application>
+        <!-- The engine's launch anchor, as in the RN library's and the Flutter plugin's
+             manifests. A provider runs before Application.onCreate, which is the only way to
+             stamp launch timings that would otherwise be gone by the time any app-level hook
+             runs. It provides no data. The authority is namespaced with ${applicationId} so
+             two apps on one device never collide. -->
+        <provider
+            android:name="com.groundcover.rum.engine.appstart.GcRumStartupProvider"
+            android:authorities="${applicationId}.groundcoverrum.android.startup"
+            android:exported="false"
+            android:initOrder="100" />
+    </application>
+</manifest>

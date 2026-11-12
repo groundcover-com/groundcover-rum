@@ -1,0 +1,462 @@
+public abstract interface class com/groundcover/rum/BeforeSend {
+	public abstract fun shouldSend (Lcom/groundcover/rum/RumEvent;)Z
+}
+
+public abstract interface class com/groundcover/rum/EnrichEvent {
+	public abstract fun enrich (Lcom/groundcover/rum/RumEvent;)Lcom/groundcover/rum/RumEvent;
+}
+
+public final class com/groundcover/rum/Groundcover {
+	public static final field INSTANCE Lcom/groundcover/rum/Groundcover;
+	public static final fun captureException (Ljava/lang/Throwable;)V
+	public static final fun captureException (Ljava/lang/Throwable;Ljava/util/Map;)V
+	public static synthetic fun captureException$default (Ljava/lang/Throwable;Ljava/util/Map;ILjava/lang/Object;)V
+	public static final fun endNavigation ()V
+	public static final fun endNavigation (Ljava/util/Map;)V
+	public static synthetic fun endNavigation$default (Ljava/util/Map;ILjava/lang/Object;)V
+	public static final fun getLogger ()Lcom/groundcover/rum/RumLogger;
+	public static final fun getSessionId ()Ljava/lang/String;
+	public static final fun identifyUser (Lcom/groundcover/rum/RumUser;)V
+	public static final fun markAppInteractive ()V
+	public static final fun sendCustomEvent (Ljava/lang/String;)V
+	public static final fun sendCustomEvent (Ljava/lang/String;Ljava/util/Map;)V
+	public static synthetic fun sendCustomEvent$default (Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+	public static final fun setSessionId ()V
+	public static final fun setSessionId (Ljava/lang/String;)V
+	public static final fun setSessionId (Ljava/lang/String;Ljava/lang/Runnable;)V
+	public static synthetic fun setSessionId$default (Ljava/lang/String;Ljava/lang/Runnable;ILjava/lang/Object;)V
+	public static final fun start (Landroid/content/Context;Lcom/groundcover/rum/GroundcoverConfig;)V
+	public static final fun startNavigation (Ljava/lang/String;)V
+	public static final fun startNavigation (Ljava/lang/String;Ljava/lang/String;)V
+	public static final fun startNavigation (Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;)V
+	public static synthetic fun startNavigation$default (Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+	public static final fun stopNavigationTracking ()V
+	public static final fun updateConfig (Lcom/groundcover/rum/GroundcoverConfigUpdate;)V
+}
+
+public final class com/groundcover/rum/GroundcoverConfig {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/groundcover/rum/RumUser;Ljava/lang/String;Lcom/groundcover/rum/GroundcoverOptions;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/groundcover/rum/RumUser;Ljava/lang/String;Lcom/groundcover/rum/GroundcoverOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getApiKey ()Ljava/lang/String;
+	public final fun getAppId ()Ljava/lang/String;
+	public final fun getCluster ()Ljava/lang/String;
+	public final fun getDsn ()Ljava/lang/String;
+	public final fun getEnvironment ()Ljava/lang/String;
+	public final fun getNamespace ()Ljava/lang/String;
+	public final fun getOptions ()Lcom/groundcover/rum/GroundcoverOptions;
+	public final fun getReleaseId ()Ljava/lang/String;
+	public final fun getSessionId ()Ljava/lang/String;
+	public final fun getUser ()Lcom/groundcover/rum/RumUser;
+}
+
+public final class com/groundcover/rum/GroundcoverConfig$Builder {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public final fun build ()Lcom/groundcover/rum/GroundcoverConfig;
+	public final fun namespace (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverConfig$Builder;
+	public final fun options (Lcom/groundcover/rum/GroundcoverOptions;)Lcom/groundcover/rum/GroundcoverConfig$Builder;
+	public final fun releaseId (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverConfig$Builder;
+	public final fun sessionId (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverConfig$Builder;
+	public final fun user (Lcom/groundcover/rum/RumUser;)Lcom/groundcover/rum/GroundcoverConfig$Builder;
+}
+
+public final class com/groundcover/rum/GroundcoverConfigUpdate {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/groundcover/rum/UserUpdate;Lcom/groundcover/rum/GroundcoverOptionsUpdate;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Lcom/groundcover/rum/UserUpdate;Lcom/groundcover/rum/GroundcoverOptionsUpdate;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getApiKey ()Ljava/lang/String;
+	public final fun getCluster ()Ljava/lang/String;
+	public final fun getDsn ()Ljava/lang/String;
+	public final fun getEnvironment ()Ljava/lang/String;
+	public final fun getNamespace ()Ljava/lang/String;
+	public final fun getOptions ()Lcom/groundcover/rum/GroundcoverOptionsUpdate;
+	public final fun getReleaseId ()Ljava/lang/String;
+	public final fun getUser ()Lcom/groundcover/rum/UserUpdate;
+}
+
+public final class com/groundcover/rum/GroundcoverConfigUpdate$Builder {
+	public fun <init> ()V
+	public final fun apiKey (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverConfigUpdate$Builder;
+	public final fun build ()Lcom/groundcover/rum/GroundcoverConfigUpdate;
+	public final fun cluster (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverConfigUpdate$Builder;
+	public final fun dsn (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverConfigUpdate$Builder;
+	public final fun environment (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverConfigUpdate$Builder;
+	public final fun namespace (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverConfigUpdate$Builder;
+	public final fun options (Lcom/groundcover/rum/GroundcoverOptionsUpdate;)Lcom/groundcover/rum/GroundcoverConfigUpdate$Builder;
+	public final fun releaseId (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverConfigUpdate$Builder;
+	public final fun user (Lcom/groundcover/rum/UserUpdate;)Lcom/groundcover/rum/GroundcoverConfigUpdate$Builder;
+}
+
+public final class com/groundcover/rum/GroundcoverInitException : java/lang/Exception {
+	public fun <init> (Ljava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/Throwable;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/Throwable;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+}
+
+public final class com/groundcover/rum/GroundcoverOptions {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/List;Ljava/lang/Double;Ljava/lang/Long;Ljava/lang/Boolean;Ljava/util/List;Lcom/groundcover/rum/BeforeSend;Lcom/groundcover/rum/EnrichEvent;Lcom/groundcover/rum/PrivacyOptions;Lcom/groundcover/rum/TracingOptions;Lcom/groundcover/rum/TransportOptions;Ljava/lang/String;Ljava/lang/String;Lcom/groundcover/rum/NativeOptions;Lcom/groundcover/rum/NativeHooks;)V
+	public synthetic fun <init> (Ljava/util/List;Ljava/lang/Double;Ljava/lang/Long;Ljava/lang/Boolean;Ljava/util/List;Lcom/groundcover/rum/BeforeSend;Lcom/groundcover/rum/EnrichEvent;Lcom/groundcover/rum/PrivacyOptions;Lcom/groundcover/rum/TracingOptions;Lcom/groundcover/rum/TransportOptions;Ljava/lang/String;Ljava/lang/String;Lcom/groundcover/rum/NativeOptions;Lcom/groundcover/rum/NativeHooks;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getAppBuild ()Ljava/lang/String;
+	public final fun getAppVersion ()Ljava/lang/String;
+	public final fun getBeforeSend ()Lcom/groundcover/rum/BeforeSend;
+	public final fun getDebug ()Ljava/lang/Boolean;
+	public final fun getEnabledEvents ()Ljava/util/List;
+	public final fun getEnrichEvent ()Lcom/groundcover/rum/EnrichEvent;
+	public final fun getExcludedUrls ()Ljava/util/List;
+	public final fun getHooks ()Lcom/groundcover/rum/NativeHooks;
+	public final fun getNative ()Lcom/groundcover/rum/NativeOptions;
+	public final fun getPrivacy ()Lcom/groundcover/rum/PrivacyOptions;
+	public final fun getSessionMaxDurationMs ()Ljava/lang/Long;
+	public final fun getSessionSampleRate ()Ljava/lang/Double;
+	public final fun getTracing ()Lcom/groundcover/rum/TracingOptions;
+	public final fun getTransport ()Lcom/groundcover/rum/TransportOptions;
+}
+
+public final class com/groundcover/rum/GroundcoverOptions$Builder {
+	public fun <init> ()V
+	public final fun appBuild (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun appVersion (Ljava/lang/String;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun beforeSend (Lcom/groundcover/rum/BeforeSend;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun build ()Lcom/groundcover/rum/GroundcoverOptions;
+	public final fun debug (Z)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun enabledEvents (Ljava/util/List;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun enrichEvent (Lcom/groundcover/rum/EnrichEvent;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun excludedUrls (Ljava/util/List;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun hooks (Lcom/groundcover/rum/NativeHooks;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun nativeOptions (Lcom/groundcover/rum/NativeOptions;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun privacy (Lcom/groundcover/rum/PrivacyOptions;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun sessionMaxDurationMs (J)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun sessionSampleRate (D)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun tracing (Lcom/groundcover/rum/TracingOptions;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+	public final fun transport (Lcom/groundcover/rum/TransportOptions;)Lcom/groundcover/rum/GroundcoverOptions$Builder;
+}
+
+public final class com/groundcover/rum/GroundcoverOptionsUpdate {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/Long;Ljava/lang/Boolean;Ljava/util/List;Lcom/groundcover/rum/BeforeSend;Lcom/groundcover/rum/EnrichEvent;Lcom/groundcover/rum/PrivacyOptions;Lcom/groundcover/rum/TracingOptions;Lcom/groundcover/rum/TransportOptions;)V
+	public synthetic fun <init> (Ljava/lang/Long;Ljava/lang/Boolean;Ljava/util/List;Lcom/groundcover/rum/BeforeSend;Lcom/groundcover/rum/EnrichEvent;Lcom/groundcover/rum/PrivacyOptions;Lcom/groundcover/rum/TracingOptions;Lcom/groundcover/rum/TransportOptions;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getBeforeSend ()Lcom/groundcover/rum/BeforeSend;
+	public final fun getDebug ()Ljava/lang/Boolean;
+	public final fun getEnrichEvent ()Lcom/groundcover/rum/EnrichEvent;
+	public final fun getExcludedUrls ()Ljava/util/List;
+	public final fun getPrivacy ()Lcom/groundcover/rum/PrivacyOptions;
+	public final fun getSessionMaxDurationMs ()Ljava/lang/Long;
+	public final fun getTracing ()Lcom/groundcover/rum/TracingOptions;
+	public final fun getTransport ()Lcom/groundcover/rum/TransportOptions;
+}
+
+public final class com/groundcover/rum/GroundcoverOptionsUpdate$Builder {
+	public fun <init> ()V
+	public final fun beforeSend (Lcom/groundcover/rum/BeforeSend;)Lcom/groundcover/rum/GroundcoverOptionsUpdate$Builder;
+	public final fun build ()Lcom/groundcover/rum/GroundcoverOptionsUpdate;
+	public final fun debug (Z)Lcom/groundcover/rum/GroundcoverOptionsUpdate$Builder;
+	public final fun enrichEvent (Lcom/groundcover/rum/EnrichEvent;)Lcom/groundcover/rum/GroundcoverOptionsUpdate$Builder;
+	public final fun excludedUrls (Ljava/util/List;)Lcom/groundcover/rum/GroundcoverOptionsUpdate$Builder;
+	public final fun privacy (Lcom/groundcover/rum/PrivacyOptions;)Lcom/groundcover/rum/GroundcoverOptionsUpdate$Builder;
+	public final fun sessionMaxDurationMs (J)Lcom/groundcover/rum/GroundcoverOptionsUpdate$Builder;
+	public final fun tracing (Lcom/groundcover/rum/TracingOptions;)Lcom/groundcover/rum/GroundcoverOptionsUpdate$Builder;
+	public final fun transport (Lcom/groundcover/rum/TransportOptions;)Lcom/groundcover/rum/GroundcoverOptionsUpdate$Builder;
+}
+
+public final class com/groundcover/rum/GroundcoverRumTesting {
+	public static final field INSTANCE Lcom/groundcover/rum/GroundcoverRumTesting;
+	public static final fun backdateLastActivity (Landroid/content/Context;J)V
+	public static final fun backdateSessionStart (Landroid/content/Context;J)V
+	public static final fun blockMainThread (Landroid/content/Context;J)V
+	public static final fun forgetSession (Landroid/content/Context;)V
+	public static final fun reset ()V
+	public static final fun triggerTestCrash (Landroid/content/Context;)V
+}
+
+public final class com/groundcover/rum/GroundcoverViews {
+	public static final fun getGroundcoverPrivate (Landroid/view/View;)Z
+	public static final fun setGroundcoverPrivate (Landroid/view/View;Z)V
+}
+
+public final class com/groundcover/rum/NativeHooks {
+	public fun <init> ()V
+	public fun <init> (ZZZZ)V
+	public synthetic fun <init> (ZZZZILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getActivities ()Z
+	public final fun getFragments ()Z
+	public final fun getTextFields ()Z
+	public final fun getWindowCallback ()Z
+}
+
+public final class com/groundcover/rum/NativeHooks$Builder {
+	public fun <init> ()V
+	public final fun activities (Z)Lcom/groundcover/rum/NativeHooks$Builder;
+	public final fun build ()Lcom/groundcover/rum/NativeHooks;
+	public final fun fragments (Z)Lcom/groundcover/rum/NativeHooks$Builder;
+	public final fun textFields (Z)Lcom/groundcover/rum/NativeHooks$Builder;
+	public final fun windowCallback (Z)Lcom/groundcover/rum/NativeHooks$Builder;
+}
+
+public final class com/groundcover/rum/NativeOptions {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/Long;Ljava/lang/Long;Lcom/groundcover/rum/TtiMode;)V
+	public synthetic fun <init> (Ljava/lang/Long;Ljava/lang/Long;Lcom/groundcover/rum/TtiMode;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getHangThresholdMs ()Ljava/lang/Long;
+	public final fun getTti ()Lcom/groundcover/rum/TtiMode;
+	public final fun getVitalsMaxSegmentMs ()Ljava/lang/Long;
+}
+
+public final class com/groundcover/rum/NativeOptions$Builder {
+	public fun <init> ()V
+	public final fun build ()Lcom/groundcover/rum/NativeOptions;
+	public final fun hangThresholdMs (J)Lcom/groundcover/rum/NativeOptions$Builder;
+	public final fun tti (Lcom/groundcover/rum/TtiMode;)Lcom/groundcover/rum/NativeOptions$Builder;
+	public final fun vitalsMaxSegmentMs (J)Lcom/groundcover/rum/NativeOptions$Builder;
+}
+
+public final class com/groundcover/rum/PrivacyLevel : java/lang/Enum {
+	public static final field ALLOW Lcom/groundcover/rum/PrivacyLevel;
+	public static final field MASK_ALL Lcom/groundcover/rum/PrivacyLevel;
+	public static final field MASK_SENSITIVE Lcom/groundcover/rum/PrivacyLevel;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWireName ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lcom/groundcover/rum/PrivacyLevel;
+	public static fun values ()[Lcom/groundcover/rum/PrivacyLevel;
+}
+
+public final class com/groundcover/rum/PrivacyOptions {
+	public fun <init> ()V
+	public fun <init> (Lcom/groundcover/rum/PrivacyLevel;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/util/List;Lcom/groundcover/rum/Redactor;Ljava/lang/Boolean;)V
+	public synthetic fun <init> (Lcom/groundcover/rum/PrivacyLevel;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/lang/Boolean;Ljava/util/List;Lcom/groundcover/rum/Redactor;Ljava/lang/Boolean;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getLevel ()Lcom/groundcover/rum/PrivacyLevel;
+	public final fun getMaskErrors ()Ljava/lang/Boolean;
+	public final fun getMaskInteractionLabels ()Ljava/lang/Boolean;
+	public final fun getMaskLogs ()Ljava/lang/Boolean;
+	public final fun getMaskNetworkBodies ()Ljava/lang/Boolean;
+	public final fun getMaskNetworkQueryParams ()Ljava/lang/Boolean;
+	public final fun getRedact ()Lcom/groundcover/rum/Redactor;
+	public final fun getSensitiveKeys ()Ljava/util/List;
+}
+
+public final class com/groundcover/rum/PrivacyOptions$Builder {
+	public fun <init> ()V
+	public final fun build ()Lcom/groundcover/rum/PrivacyOptions;
+	public final fun level (Lcom/groundcover/rum/PrivacyLevel;)Lcom/groundcover/rum/PrivacyOptions$Builder;
+	public final fun maskErrors (Z)Lcom/groundcover/rum/PrivacyOptions$Builder;
+	public final fun maskInteractionLabels (Z)Lcom/groundcover/rum/PrivacyOptions$Builder;
+	public final fun maskLogs (Z)Lcom/groundcover/rum/PrivacyOptions$Builder;
+	public final fun maskNetworkBodies (Z)Lcom/groundcover/rum/PrivacyOptions$Builder;
+	public final fun maskNetworkQueryParams (Z)Lcom/groundcover/rum/PrivacyOptions$Builder;
+	public final fun redact (Lcom/groundcover/rum/Redactor;)Lcom/groundcover/rum/PrivacyOptions$Builder;
+	public final fun sensitiveKeys (Ljava/util/List;)Lcom/groundcover/rum/PrivacyOptions$Builder;
+}
+
+public final class com/groundcover/rum/RedactField {
+	public fun <init> (Ljava/lang/String;Ljava/lang/Object;Ljava/util/List;Lcom/groundcover/rum/RedactKind;Z)V
+	public final fun getKey ()Ljava/lang/String;
+	public final fun getKind ()Lcom/groundcover/rum/RedactKind;
+	public final fun getPath ()Ljava/util/List;
+	public final fun getSensitive ()Z
+	public final fun getValue ()Ljava/lang/Object;
+}
+
+public final class com/groundcover/rum/RedactKind : java/lang/Enum {
+	public static final field ERROR Lcom/groundcover/rum/RedactKind;
+	public static final field HEADER Lcom/groundcover/rum/RedactKind;
+	public static final field LOG Lcom/groundcover/rum/RedactKind;
+	public static final field QUERY Lcom/groundcover/rum/RedactKind;
+	public static final field REQUEST_BODY Lcom/groundcover/rum/RedactKind;
+	public static final field RESPONSE_BODY Lcom/groundcover/rum/RedactKind;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWireName ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lcom/groundcover/rum/RedactKind;
+	public static fun values ()[Lcom/groundcover/rum/RedactKind;
+}
+
+public abstract interface class com/groundcover/rum/Redactor {
+	public abstract fun redact (Lcom/groundcover/rum/RedactField;)Ljava/lang/Object;
+}
+
+public final class com/groundcover/rum/RumEvent {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/String;)V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/String;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/Long;Ljava/lang/String;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getAttributes ()Ljava/util/Map;
+	public final fun getEndTimestamp ()Ljava/lang/Long;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getParentSpanId ()Ljava/lang/String;
+	public final fun getSpanId ()Ljava/lang/String;
+	public final fun getSpanName ()Ljava/lang/String;
+	public final fun getStartTimestamp ()Ljava/lang/Long;
+	public final fun getTimestamp ()Ljava/lang/Long;
+	public final fun getTraceId ()Ljava/lang/String;
+	public final fun getType ()Ljava/lang/String;
+	public final fun setAttributes (Ljava/util/Map;)V
+	public final fun setEndTimestamp (Ljava/lang/Long;)V
+	public final fun setParentSpanId (Ljava/lang/String;)V
+	public final fun setSpanId (Ljava/lang/String;)V
+	public final fun setSpanName (Ljava/lang/String;)V
+	public final fun setStartTimestamp (Ljava/lang/Long;)V
+	public final fun setTimestamp (Ljava/lang/Long;)V
+	public final fun setTraceId (Ljava/lang/String;)V
+}
+
+public final class com/groundcover/rum/RumEventName : java/lang/Enum {
+	public static final field APP_START Lcom/groundcover/rum/RumEventName;
+	public static final field CRASHES Lcom/groundcover/rum/RumEventName;
+	public static final field EXCEPTIONS Lcom/groundcover/rum/RumEventName;
+	public static final field HANGS Lcom/groundcover/rum/RumEventName;
+	public static final field INTERACTION Lcom/groundcover/rum/RumEventName;
+	public static final field LOGS Lcom/groundcover/rum/RumEventName;
+	public static final field NAVIGATION Lcom/groundcover/rum/RumEventName;
+	public static final field NETWORK Lcom/groundcover/rum/RumEventName;
+	public static final field VITALS Lcom/groundcover/rum/RumEventName;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public final fun getWireName ()Ljava/lang/String;
+	public static fun valueOf (Ljava/lang/String;)Lcom/groundcover/rum/RumEventName;
+	public static fun values ()[Lcom/groundcover/rum/RumEventName;
+}
+
+public final class com/groundcover/rum/RumLogger {
+	public final fun debug (Ljava/lang/String;)V
+	public final fun debug (Ljava/lang/String;Ljava/util/Map;)V
+	public static synthetic fun debug$default (Lcom/groundcover/rum/RumLogger;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+	public final fun error (Ljava/lang/String;)V
+	public final fun error (Ljava/lang/String;Ljava/util/Map;)V
+	public static synthetic fun error$default (Lcom/groundcover/rum/RumLogger;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+	public final fun info (Ljava/lang/String;)V
+	public final fun info (Ljava/lang/String;Ljava/util/Map;)V
+	public static synthetic fun info$default (Lcom/groundcover/rum/RumLogger;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+	public final fun log (Ljava/lang/String;)V
+	public final fun log (Ljava/lang/String;Ljava/util/Map;)V
+	public static synthetic fun log$default (Lcom/groundcover/rum/RumLogger;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+	public final fun trace (Ljava/lang/String;)V
+	public final fun trace (Ljava/lang/String;Ljava/util/Map;)V
+	public static synthetic fun trace$default (Lcom/groundcover/rum/RumLogger;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+	public final fun warn (Ljava/lang/String;)V
+	public final fun warn (Ljava/lang/String;Ljava/util/Map;)V
+	public static synthetic fun warn$default (Lcom/groundcover/rum/RumLogger;Ljava/lang/String;Ljava/util/Map;ILjava/lang/Object;)V
+}
+
+public final class com/groundcover/rum/RumUser {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;)V
+	public synthetic fun <init> (Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/lang/String;Ljava/util/Map;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getEmail ()Ljava/lang/String;
+	public final fun getId ()Ljava/lang/String;
+	public final fun getName ()Ljava/lang/String;
+	public final fun getOrganization ()Ljava/lang/String;
+	public final fun getProperties ()Ljava/util/Map;
+	public final fun getRole ()Ljava/lang/String;
+}
+
+public final class com/groundcover/rum/RumUser$Builder {
+	public fun <init> ()V
+	public final fun build ()Lcom/groundcover/rum/RumUser;
+	public final fun email (Ljava/lang/String;)Lcom/groundcover/rum/RumUser$Builder;
+	public final fun id (Ljava/lang/String;)Lcom/groundcover/rum/RumUser$Builder;
+	public final fun name (Ljava/lang/String;)Lcom/groundcover/rum/RumUser$Builder;
+	public final fun organization (Ljava/lang/String;)Lcom/groundcover/rum/RumUser$Builder;
+	public final fun properties (Ljava/util/Map;)Lcom/groundcover/rum/RumUser$Builder;
+	public final fun role (Ljava/lang/String;)Lcom/groundcover/rum/RumUser$Builder;
+}
+
+public final class com/groundcover/rum/TracingOptions {
+	public fun <init> ()V
+	public fun <init> (Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Lcom/groundcover/rum/TracingOrigin;)V
+	public synthetic fun <init> (Ljava/util/List;Ljava/util/List;Ljava/lang/String;Ljava/lang/String;Lcom/groundcover/rum/TracingOrigin;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getOrigin ()Lcom/groundcover/rum/TracingOrigin;
+	public final fun getPropagationHeaders ()Ljava/util/List;
+	public final fun getPropagationUrls ()Ljava/util/List;
+	public final fun getSpanIdHeaderName ()Ljava/lang/String;
+	public final fun getTraceIdHeaderName ()Ljava/lang/String;
+}
+
+public final class com/groundcover/rum/TracingOptions$Builder {
+	public fun <init> ()V
+	public final fun build ()Lcom/groundcover/rum/TracingOptions;
+	public final fun origin (Lcom/groundcover/rum/TracingOrigin;)Lcom/groundcover/rum/TracingOptions$Builder;
+	public final fun propagationHeaders (Ljava/util/List;)Lcom/groundcover/rum/TracingOptions$Builder;
+	public final fun propagationUrls (Ljava/util/List;)Lcom/groundcover/rum/TracingOptions$Builder;
+	public final fun spanIdHeaderName (Ljava/lang/String;)Lcom/groundcover/rum/TracingOptions$Builder;
+	public final fun traceIdHeaderName (Ljava/lang/String;)Lcom/groundcover/rum/TracingOptions$Builder;
+}
+
+public final class com/groundcover/rum/TracingOrigin {
+	public fun <init> (Ljava/lang/String;Ljava/lang/String;)V
+	public final fun getName ()Ljava/lang/String;
+	public final fun getValue ()Ljava/lang/String;
+}
+
+public final class com/groundcover/rum/TransportOptions {
+	public fun <init> ()V
+	public fun <init> (Ljava/lang/Integer;Ljava/lang/Long;Ljava/lang/Boolean;)V
+	public synthetic fun <init> (Ljava/lang/Integer;Ljava/lang/Long;Ljava/lang/Boolean;ILkotlin/jvm/internal/DefaultConstructorMarker;)V
+	public final fun getBatchSize ()Ljava/lang/Integer;
+	public final fun getBatchTimeoutMs ()Ljava/lang/Long;
+	public final fun getCompression ()Ljava/lang/Boolean;
+}
+
+public final class com/groundcover/rum/TransportOptions$Builder {
+	public fun <init> ()V
+	public final fun batchSize (I)Lcom/groundcover/rum/TransportOptions$Builder;
+	public final fun batchTimeoutMs (J)Lcom/groundcover/rum/TransportOptions$Builder;
+	public final fun build ()Lcom/groundcover/rum/TransportOptions;
+	public final fun compression (Z)Lcom/groundcover/rum/TransportOptions$Builder;
+}
+
+public final class com/groundcover/rum/TtiMode : java/lang/Enum {
+	public static final field AUTO Lcom/groundcover/rum/TtiMode;
+	public static final field MANUAL Lcom/groundcover/rum/TtiMode;
+	public static fun getEntries ()Lkotlin/enums/EnumEntries;
+	public static fun valueOf (Ljava/lang/String;)Lcom/groundcover/rum/TtiMode;
+	public static fun values ()[Lcom/groundcover/rum/TtiMode;
+}
+
+public abstract class com/groundcover/rum/UrlPattern {
+	public static final field Companion Lcom/groundcover/rum/UrlPattern$Companion;
+	public static final fun of (Ljava/lang/String;)Lcom/groundcover/rum/UrlPattern;
+	public static final fun of (Ljava/util/regex/Pattern;)Lcom/groundcover/rum/UrlPattern;
+	public static final fun of (Lkotlin/text/Regex;)Lcom/groundcover/rum/UrlPattern;
+}
+
+public final class com/groundcover/rum/UrlPattern$Companion {
+	public final fun of (Ljava/lang/String;)Lcom/groundcover/rum/UrlPattern;
+	public final fun of (Ljava/util/regex/Pattern;)Lcom/groundcover/rum/UrlPattern;
+	public final fun of (Lkotlin/text/Regex;)Lcom/groundcover/rum/UrlPattern;
+}
+
+public final class com/groundcover/rum/UrlPattern$Expression : com/groundcover/rum/UrlPattern {
+	public fun <init> (Lkotlin/text/Regex;)V
+	public final fun getRegex ()Lkotlin/text/Regex;
+}
+
+public final class com/groundcover/rum/UrlPattern$Text : com/groundcover/rum/UrlPattern {
+	public fun <init> (Ljava/lang/String;)V
+	public final fun getValue ()Ljava/lang/String;
+}
+
+public abstract class com/groundcover/rum/UserUpdate {
+	public static final field Companion Lcom/groundcover/rum/UserUpdate$Companion;
+	public static final fun clear ()Lcom/groundcover/rum/UserUpdate;
+	public static final fun set (Lcom/groundcover/rum/RumUser;)Lcom/groundcover/rum/UserUpdate;
+}
+
+public final class com/groundcover/rum/UserUpdate$Clear : com/groundcover/rum/UserUpdate {
+	public static final field INSTANCE Lcom/groundcover/rum/UserUpdate$Clear;
+}
+
+public final class com/groundcover/rum/UserUpdate$Companion {
+	public final fun clear ()Lcom/groundcover/rum/UserUpdate;
+	public final fun set (Lcom/groundcover/rum/RumUser;)Lcom/groundcover/rum/UserUpdate;
+}
+
+public final class com/groundcover/rum/UserUpdate$Set : com/groundcover/rum/UserUpdate {
+	public fun <init> (Lcom/groundcover/rum/RumUser;)V
+	public final fun getUser ()Lcom/groundcover/rum/RumUser;
+}
+
+public abstract interface annotation class com/groundcover/rum/internal/InternalGroundcoverApi : java/lang/annotation/Annotation {
+}
+

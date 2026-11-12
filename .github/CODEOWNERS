@@ -1,0 +1,28 @@
+# What decides how the SDKs are built, tested and published. A change to any of these needs an
+# approving review from a maintainer: the main branch requires code-owner review.
+
+# CI, release workflows, this file and the Dependabot config
+/.github/                                     @groundcover-com/rum-maintainers
+
+# Dependencies and the scripts every build runs
+/package.json                                 @groundcover-com/rum-maintainers
+/pnpm-lock.yaml                               @groundcover-com/rum-maintainers
+/pnpm-workspace.yaml                          @groundcover-com/rum-maintainers
+/patches/                                     @groundcover-com/rum-maintainers
+/scripts/                                     @groundcover-com/rum-maintainers
+
+# What each package publishes
+/packages/*/package.json                      @groundcover-com/rum-maintainers
+/packages/react-native/GroundcoverRum.podspec @groundcover-com/rum-maintainers
+/packages/flutter/pubspec.yaml                @groundcover-com/rum-maintainers
+/packages/flutter/.pubignore                  @groundcover-com/rum-maintainers
+/packages/flutter/ios/groundcover_rum.podspec @groundcover-com/rum-maintainers
+/packages/ios/Package.swift                   @groundcover-com/rum-maintainers
+/packages/ios/scripts/                        @groundcover-com/rum-maintainers
+/packages/android/gradle.properties           @groundcover-com/rum-maintainers
+/packages/android/settings.gradle.kts         @groundcover-com/rum-maintainers
+/packages/android/*/build.gradle.kts          @groundcover-com/rum-maintainers
+# The Gradle wrapper decides which Gradle builds the signed Maven artifacts
+/packages/android/gradlew                     @groundcover-com/rum-maintainers
+/packages/android/gradlew.bat                 @groundcover-com/rum-maintainers
+/packages/android/gradle/                     @groundcover-com/rum-maintainers

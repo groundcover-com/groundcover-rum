@@ -1,0 +1,73 @@
+# Dependencies
+node_modules
+.pnpm-store/
+
+# Build outputs
+dist
+build
+.next
+
+apps/nextjs/.next
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Turbo
+.turbo
+
+# Cache
+.rollup.cache
+
+# OS
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# IDE/Editor
+.idea
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+playwright-report
+test-results
+
+# Playwright
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+# RN's copy of the native engine, written from packages/core by
+# scripts/vendor-engine.mjs (root `prepare`, and before publish). Edit the
+# engine under packages/core/{swift,kotlin}; this copy is overwritten.
+packages/react-native/ios/Engine/
+packages/react-native/android/src/main/java/com/groundcover/rum/engine/
+
+# The native iOS SDK's copy of the engine, written the same way.
+packages/ios/Sources/GroundcoverRum/Engine/
+packages/ios/Sources/GroundcoverRumBoot/
+
+# SwiftPM and Xcode state for the native iOS SDK's package. Package.resolved too: a
+# library's pins bind nobody who depends on it, so the package builds against what
+# its customers resolve, and the apps that build it pin their own, as Flutter's do.
+packages/ios/.build/
+packages/ios/.swiftpm/
+packages/ios/Package.resolved
+
+# SwiftPM build output for the iOS engine's test harness
+packages/core/swift/.build/
+
+# Gradle output for the Kotlin engine's JVM test harness
+packages/core/kotlin/jvm-test/.gradle/
+packages/core/kotlin/jvm-test/build/

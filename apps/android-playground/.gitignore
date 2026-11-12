@@ -1,0 +1,11 @@
+.gradle/
+.kotlin/
+build/
+/local.properties
+*.iml
+.idea/
+.cxx/
+captures/
+
+# A device run's environment, ingest key included (README): never committed.
+device.properties

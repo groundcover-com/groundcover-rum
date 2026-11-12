@@ -1,0 +1,71 @@
+buildscript {
+  ext.getExtOrDefault = { name, defaultValue ->
+    // Inherit the host app's toolchain versions when it sets them (Expo and RN
+    // CLI templates both do), so this library never pins the app to a different
+    // Kotlin/AGP than the rest of its native dependencies.
+    rootProject.ext.has(name) ? rootProject.ext.get(name) : defaultValue
+  }
+
+  repositories {
+    google()
+    mavenCentral()
+  }
+
+  dependencies {
+    classpath "com.android.tools.build:gradle:${getExtOrDefault('agpVersion', '8.6.0')}"
+    classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:${getExtOrDefault('kotlinVersion', '1.9.24')}"
+  }
+}
+
+apply plugin: "com.android.library"
+apply plugin: "org.jetbrains.kotlin.android"
+
+android {
+  namespace "com.groundcover.rum"
+  compileSdk getExtOrDefault("compileSdkVersion", 35)
+
+  defaultConfig {
+    // RN 0.74's floor, and a default rather than a hard minimum: every RN template
+    // sets rootProject.ext.minSdkVersion, so a host that states a lower one is
+    // inherited from rather than overridden. Features above it (FrameMetrics 24,
+    // ApplicationExitInfo 30) are Build.VERSION-guarded per feature rather than
+    // raising minSdk and locking out host apps.
+    minSdk getExtOrDefault("minSdkVersion", 23)
+
+    // Shipped INSIDE the AAR and applied to the host app's R8 run automatically, so an app
+    // that enables minification does not have to know this library needs rules. Expo defaults
+    // `enableProguardInReleaseBuilds=false`, so most hosts never exercise these rules — but the
+    // bridge is dispatched reflectively by name and would break the first time a host turned
+    // minification on.
+    consumerProguardFiles "consumer-rules.pro"
+  }
+
+  compileOptions {
+    sourceCompatibility JavaVersion.VERSION_17
+    targetCompatibility JavaVersion.VERSION_17
+  }
+
+  kotlinOptions {
+    jvmTarget = "17"
+  }
+
+  testOptions {
+    unitTests.returnDefaultValues = true
+  }
+}
+
+repositories {
+  google()
+  mavenCentral()
+}
+
+dependencies {
+  implementation "com.facebook.react:react-android"
+  implementation "org.jetbrains.kotlin:kotlin-stdlib:${getExtOrDefault('kotlinVersion', '1.9.24')}"
+  // @RequiresApi only — features above minSdk are Build.VERSION-guarded per
+  // feature rather than raising the floor for every host app.
+  implementation "androidx.annotation:annotation:1.8.2"
+
+  testImplementation "junit:junit:4.13.2"
+  testImplementation "org.robolectric:robolectric:4.13"
+}

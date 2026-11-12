@@ -1,0 +1,71 @@
+name: Publish React Native Package to npmjs
+# Manual dispatch. Releases run from main; a release candidate can run from a branch, to test an
+# integration before it merges. No `release` trigger, so creating a GitHub release publishes
+# nothing.
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # Enabled in groundcover-rum, where the `npm` environment requires a maintainer's approval and
+    # npm's trusted publishing is bound to it. Here it would be created on first use with no rules.
+    # environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22.x'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Pin npm version
+        run: npm install -g npm@11.15.0
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 9
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build packages
+        run: pnpm run build
+
+      - name: Run tests
+        run: pnpm test
+
+      - name: Get package version
+        run: |
+          VERSION=$(node -p "require('./packages/react-native/package.json').version")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Publishing version: $VERSION"
+
+      - name: Build the react-native package
+        run: pnpm --filter @groundcover/react-native build
+
+      - name: Publish react-native package
+        run: |
+          cd packages/react-native
+          # Prerelease versions (e.g. 0.1.0-rc.0) must publish under an explicit
+          # dist-tag — npm won't implicitly tag a prerelease as `latest`. Use the
+          # prerelease channel (rc/beta/next/…) as the tag; stable → `latest`.
+          if [[ "$VERSION" == *-* ]]; then
+            PRERELEASE="${VERSION#*-}"      # e.g. rc.0
+            TAG="${PRERELEASE%%.*}"         # e.g. rc
+          else
+            TAG="latest"
+          fi
+          echo "Publishing $VERSION under dist-tag: $TAG"
+          # The package's `prepack` rewrites RN's git-ignored copy of the native
+          # engine from packages/core first, so the tarball ships the engine that
+          # was checked out. Hence no --ignore-scripts here.
+          npm publish --access public --tag "$TAG"

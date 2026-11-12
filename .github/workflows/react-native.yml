@@ -1,0 +1,1252 @@
+name: React Native CI
+
+# Unit + on-device e2e for @groundcover/react-native, on RN-touching changes.
+# Not restricted to a `main` base, so it runs on stacked PR branches too, as the
+# Flutter and native lanes do (web.yml and core.yml run only on PRs to main).
+#
+# Runs ONCE per PR (one unit + one iOS + one Android job): `push` is scoped to
+# main (post-merge), feature-branch work is covered by `pull_request` — so a
+# same-repo PR doesn't fire both a push and a pull_request run.
+#
+# `push` is still path-filtered at the trigger. `pull_request` is NOT, and that
+# asymmetry is deliberate: `RN CI` at the bottom of this file is a REQUIRED
+# status check, and a workflow skipped by a trigger-level path filter creates no
+# check run at all, which blocks the PR forever. So on PRs the workflow always
+# starts, the `changes` job decides whether the lane's work runs, and `gate`
+# always reports. `push` has no check to report, so it keeps the cheaper filter.
+# Full reasoning in .github/actions/changed-paths.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/react-native/**'
+      # Includes the native engine (packages/core/{swift,kotlin}), which RN ships a
+      # vendored copy of.
+      - 'packages/core/**'
+      - 'scripts/vendor-engine.mjs'
+      # The engine's unit-test steps, shared with flutter.yml.
+      - '.github/actions/engine-tests-kotlin/**'
+      - 'apps/rn-playground/**'
+      - 'tests/e2e/mobile/**'
+      - 'mobilewright.config.ts'
+      - '.github/workflows/react-native.yml'
+      # The classifier that decides whether this lane runs on a PR. It has to be
+      # here as well: without it an action-only commit on main skips the whole
+      # lane, so a change to the very logic gating RN CI would get no post-merge
+      # RN signal at all.
+      - '.github/actions/changed-paths/**'
+      # Root dependency/workspace inputs: every job runs `pnpm install
+      # --frozen-lockfile`, so a change to these can alter what the RN pipeline
+      # builds/tests. Included so the pipeline can't go stale on root-only PRs.
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      # Set aside after the includes above, as the `changes` job does.
+      - '!packages/core/**/*.md'
+      - '!tests/e2e/mobile/native-*.sh'
+      - '!tests/e2e/mobile/ci-native-*.sh'
+      #
+      # THIS LIST AND THE `changes` JOB'S PATTERN LIST MUST AGREE. They express
+      # one policy in two syntaxes — globs for the trigger, anchored regexes for
+      # the job — because `push` has no check to report and can still filter at
+      # the trigger, while `pull_request` cannot. A path added to one and not the
+      # other silently changes when the lane runs. flutter.yml, native-ios.yml
+      # and native-android.yml filter `push` too, with the same two lists to keep
+      # in step; web.yml and core.yml are unfiltered on push and so always produce
+      # a post-merge signal.
+  # No `paths:` here on purpose — see the header. The same list lives in the
+  # `changes` job below, which is what actually gates the lane on PRs.
+  pull_request:
+  workflow_dispatch:
+
+# Least privilege: these jobs only read the repo (build + test on a booted
+# device); nothing pushes, comments, or writes. `pull-requests: read` is granted
+# to the `changes` job alone, not to the device jobs that run PR code.
+permissions:
+  contents: read
+
+# Only PR runs are cancelled: a main run is the post-merge signal and must always finish.
+concurrency:
+  group: rn-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+# One place for the node major. Referenced by all six setup-node steps AND by
+# both prebuilt-app cache keys — see those keys for why they have to agree.
+env:
+  NODE_VERSION: '24.x'
+  # The Android emulator build every e2e shard boots (37.2.12). Pinned because the
+  # cached AVD snapshot only works with the build that wrote it; the snapshot's
+  # cache key includes this, so a bump regenerates the snapshot.
+  ANDROID_EMULATOR_BUILD: '16428233'
+
+jobs:
+  # Does this diff touch the RN surface at all?
+  #
+  # This is the `pull_request` half of the trigger's `paths:` list, in a job so
+  # the workflow can always run and always report. On `push` the trigger-level
+  # filter does the work, so the action waves it through.
+  # A small job against the macOS and emulator time it can skip.
+  #
+  # Fail-CLOSED, deliberately: a positive list, so an unrecognised path does NOT
+  # boot a fleet of macOS runners and three emulators. web.yml's filter is the
+  # mirror image — a negative list, failing open, because there a missed path
+  # costs coverage rather than money. The two lanes want opposite failure
+  # directions; do not "make them consistent".
+  changes:
+    # Distinct per lane: the job name IS the check context, so two lanes both
+    # calling this `Changed paths` would render two identical rows in the PR and
+    # collide as one context if anyone ever required it.
+    name: RN changed paths
+    # Scoped here rather than at workflow level. `pull-requests: read` is only
+    # needed to list the PR's files, and every other job in this lane runs
+    # PR-authored code by design — install scripts, the specs themselves — so
+    # handing them PR API authority they never use is authority they can leak.
+    # A job-level `permissions:` REPLACES the workflow default, so `contents:
+    # read` is restated here for the checkout.
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      rn: ${{ steps.filter.outputs.rn }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions/changed-paths
+      - id: paths
+        uses: ./.github/actions/changed-paths
+      - name: Decide whether the RN lane runs
+        id: filter
+        env:
+          FILES: ${{ steps.paths.outputs.files-path }}
+          IS_PR: ${{ steps.paths.outputs.is-pull-request }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_PR" != 'true' ]; then
+            echo 'not a PR — the trigger already filtered this'
+            echo 'rn=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Keep in sync with the `push` trigger's paths: list above. The root
+          # dependency/workspace inputs are here for the same reason they are
+          # there — every job runs `pnpm install --frozen-lockfile`, so a change
+          # to them alters what this pipeline builds and tests. packages/core is
+          # included because RN aliases it to ../core/ts/src and tsup inlines it,
+          # so a core change is a source change inside the RN bundle. It also holds
+          # the native engine RN vendors (core/swift, core/kotlin) and its unit suites.
+          # Its Markdown, and the native lanes' own scripts in the shared e2e suite,
+          # reach no RN build or test. A temp file rather than a pipe: `grep -q`
+          # exiting early can SIGPIPE the writer, which pipefail reads as no match.
+          grep -vE \
+              -e '^packages/core/.*\.md$' \
+              -e '^tests/e2e/mobile/(ci-)?native-[^/]+\.sh$' \
+              "$FILES" > "$RUNNER_TEMP/rn-files" || true
+          if grep -qE \
+              -e '^packages/react-native/' \
+              -e '^packages/core/' \
+              -e '^scripts/vendor-engine\.mjs$' \
+              -e '^apps/rn-playground/' \
+              -e '^tests/e2e/mobile/' \
+              -e '^mobilewright\.config\.ts$' \
+              -e '^\.github/workflows/react-native\.yml$' \
+              -e '^\.github/actions/changed-paths/' \
+              -e '^\.github/actions/engine-tests-kotlin/' \
+              -e '^package\.json$' \
+              -e '^pnpm-lock\.yaml$' \
+              -e '^pnpm-workspace\.yaml$' \
+              "$RUNNER_TEMP/rn-files"; then
+            echo 'RN-relevant changes found — running the lane'
+            echo 'rn=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'no RN-relevant changes — skipping the lane'
+            echo 'rn=false' >> "$GITHUB_OUTPUT"
+          fi
+
+  # The cheapest gate in the pipeline, and therefore the first: static analysis
+  # only — eslint plus the two typechecks — with nothing to boot and nothing to
+  # build. Everything else `needs` it, so a lint error or a type error costs one
+  # small ubuntu job rather than a fleet of macOS runners and three emulators.
+  #
+  # Worth being explicit about the trade: this adds its own duration as serial
+  # latency to every downstream job, even when they would all have passed. That is
+  # the right side of the trade only because it is fast and because it catches the
+  # class of error that is otherwise found LAST — after the device lanes.
+  #
+  # This is the ONLY job carrying the `changes` gate, and that is sufficient:
+  # every other job in the lane depends on `lint` transitively, and GitHub skips
+  # a job whose `needs` was skipped. One condition, whole lane — six fewer places
+  # to forget.
+  lint:
+    name: Lint + typecheck
+    needs: changes
+    if: ${{ needs.changes.outputs.rn == 'true' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # 24.x, an LTS line, matching the web lane. The publisher runs 22.x;
+          # packages/react-native/dist is expected to build identically under
+          # both majors, so what ships is what CI tested.
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 9.15.0
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      # Restore-only. In this workflow the save is gated on main and lives in this
+      # job alone; see that step below for the reasoning, which the other five
+      # pnpm caches in this file point back to.
+      - name: Restore pnpm store
+        id: pnpm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+      - run: pnpm install --frozen-lockfile
+      # Save only from main, and only from one job per runner OS in this workflow.
+      #
+      # GitHub scopes cache WRITES per branch while reads fall back to the default
+      # branch. An unconditional save would have every PR branch restore main's
+      # store and then write its own duplicate, until the repo passed GitHub's
+      # 10GB cache ceiling and evicted continuously — taking this lane's
+      # expensive apk, pod and AVD caches with it. Restoring from main is all a
+      # branch needs.
+      #
+      # One writer per OS here, not six: `lint` writes Linux (it runs first,
+      # everything `needs` it, and its install is unconditional, so downstream
+      # Linux jobs in the SAME run restore what it just wrote) and `e2e-ios`
+      # shard 1 writes macOS. Core CI also saves the same Linux key from main;
+      # whichever save lands first wins, and the other is rejected as a duplicate.
+      # `ios-app`/`android-app` are not the writers despite running earlier —
+      # their pnpm steps are skipped on a prebuilt-app cache hit, so they would
+      # seed the store only on the runs that happen to rebuild the app.
+      #
+      # `cache-hit != 'true'` because an exact-key save is rejected as a
+      # duplicate.
+      - name: Save pnpm store
+        if: ${{ github.ref == 'refs/heads/main' && steps.pnpm-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+      - name: Lint (@groundcover/react-native)
+        run: pnpm --filter @groundcover/react-native lint
+      # Covers src/**/*.test.ts and the test-utils stubs, which the shipping-build
+      # tsconfig excludes.
+      - name: Typecheck tests (@groundcover/react-native)
+        run: pnpm --filter @groundcover/react-native typecheck:tests
+      # The e2e specs typecheck against Mobilewright's real API + the ingest
+      # client/server. A quick compile here beats discovering drift inside the
+      # macOS/emulator jobs. Run via the package's own tsc; the config
+      # path is absolute so `--filter` cwd doesn't matter.
+      - name: Typecheck e2e specs
+        run: pnpm --filter @groundcover/react-native exec tsc -p "$GITHUB_WORKSPACE/tests/e2e/mobile"
+      # The harness's own judgements — tap geometry, the foreign-reporter
+      # predicate, the settle loop's outcome — as plain unit tests. They need no
+      # device, so they belong here rather than inside a device job:
+      # a helper bug found here names itself, while the same bug found there
+      # surfaces as a spec failing for a reason that points somewhere else.
+      # Borrows the same package's vitest for the same reason tsc is borrowed
+      # above (see the config's header for why not a root dependency).
+      - name: Unit-test e2e helpers
+        run: pnpm --filter @groundcover/react-native exec vitest run --config "$GITHUB_WORKSPACE/tests/e2e/mobile/support/vitest.config.ts"
+      # The playground's own config judgement: which preset a build boots on, and where it
+      # posts. Both fail SILENTLY on a device — a defaulted preset or a defaulted DSN gives an
+      # app that launches, raises nothing and reports nowhere — so they are guarded here rather
+      # than discovered during a manual device run.
+      - name: Unit-test playground config
+        run: pnpm --filter @groundcover/react-native exec vitest run --config "$GITHUB_WORKSPACE/apps/rn-playground/src/vitest.config.ts"
+      # packages/core/{swift,kotlin} is the only copy of the engine anyone edits.
+      # RN's copy is written by scripts/vendor-engine.mjs at install and before
+      # publish, and is git-ignored, so there is nothing committed that could
+      # drift. This guards the one way back to that: a `git add -f`.
+      - name: RN's engine copy is not committed
+        run: |
+          tracked=$(git ls-files packages/react-native/ios/Engine packages/react-native/android/src/main/java/com/groundcover/rum/engine)
+          if [ -n "$tracked" ]; then
+            echo "::error::RN's engine copy is generated from packages/core; remove it from git:"
+            echo "$tracked"
+            exit 1
+          fi
+
+  unit:
+    name: Unit tests (JS)
+    needs: lint
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 9.15.0
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      # Restore-only, no save — see the `lint` job for why, and for which two
+      # jobs own the writes.
+      - name: Restore pnpm store
+        id: pnpm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+      - run: pnpm install --frozen-lockfile
+      # vitest only — the typecheck and lint halves of the package's `test` script
+      # are the `lint` job above, so this does not re-run them.
+      #
+      # vitest aliases @groundcover/rum-core to its TS source, so no core build is
+      # needed here.
+      - name: Unit tests (@groundcover/react-native)
+        run: pnpm --filter @groundcover/react-native exec vitest run
+      # tsup build gate — the published artifact (dts + cjs/esm) must compile.
+      - name: Build (@groundcover/react-native)
+        run: pnpm --filter @groundcover/react-native build
+
+  # The Kotlin engine off-device: its pure logic — crash-record mapping,
+  # ApplicationExitInfo selection, frame aggregation — plus the pieces needing only
+  # android.*, which run under Robolectric. The gesture tracker's teardown races are
+  # the reason that tier exists: they are orderings between the bridge thread and the
+  # main looper, so they need a pausable looper to be reproducible at all and no
+  # amount of device time would pin them.
+  #
+  # Still no Android SDK and no emulator — Robolectric brings its own instrumented
+  # android jar, and the Gradle cache below keeps that a one-time download.
+  #
+  # Its own job, and a `needs` of the Android e2e lane, so the emulator fleet is
+  # never booted against an engine whose unit tests are already failing. It cannot
+  # live inside the e2e job: `expo run:android` only assembles and never executes
+  # unit tests, and on an apk cache hit Gradle is skipped entirely.
+  android-unit:
+    name: Engine unit tests (Kotlin)
+    needs: lint
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Shared with flutter.yml, which ships the same engine.
+      #
+      # Read-only off main: GitHub scopes cache writes per branch, so a save from
+      # every PR would duplicate the Gradle cache per branch. Main saves it
+      # whenever this lane runs there.
+      - uses: ./.github/actions/engine-tests-kotlin
+        with:
+          cache-read-only: ${{ github.ref != 'refs/heads/main' }}
+
+  # Everything the iOS lane needs exactly ONCE, ahead of the shards: the Swift
+  # engine tests, and the prebuilt .app the shards install.
+  #
+  # In the shards, both would be re-paid per shard: the engine tests give the
+  # same verdict every time, and a cache-miss gate is evaluated PER SHARD, so a
+  # native change would run the same full xcodebuild on all three
+  # concurrently, on costly macOS runners. Here: one build, one save, three
+  # restores. A run that builds also uploads the .app as an artifact, which the
+  # shards fall back on if the cache gives them nothing.
+  #
+  # What this costs is serial latency the shards wait on, which stays short on
+  # the common cache-HIT path (checkout + Xcode select + engine tests + restore).
+  # Everything needed only in order to BUILD is gated on the miss, so a hit stays
+  # thin rather than dragging a pnpm install and a pod cache along with it.
+  ios-app:
+    name: iOS app + engine tests (once)
+    # Behind lint, like every other lane: macOS runners are costly and there is
+    # no sense paying for one to discover an eslint error.
+    needs: lint
+    runs-on: blacksmith-12vcpu-macos-latest
+    timeout-minutes: 45
+    outputs:
+      # The shards restore by this exact key instead of recomputing hashFiles, so
+      # producer and consumer cannot disagree about which binary is current.
+      key: ${{ steps.appkey.outputs.key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The prebuilt-app cache key, computed ONCE here and exported as a job output
+      # so the restore in every shard uses the identical string.
+      #
+      # Scoped to source directories rather than to `packages/react-native/ios/**`
+      # because `hashFiles` walks the FILESYSTEM and does not respect .gitignore.
+      # A wholesale glob would sweep in the SwiftPM `.build/` tree that
+      # `run-engine-tests.sh` creates below — including `build.db` and
+      # `manifest.db`, SQLite files carrying absolute paths and timestamps — so
+      # the key would differ on every run and the cache would never hit.
+      #
+      # Only inputs that end up INSIDE the .app belong here. For the engine that is
+      # packages/core/swift/Engine, the source RN's copy is written from — the copy
+      # itself is git-ignored and generated at install, so at this point it does
+      # not exist yet — and scripts/vendor-engine.mjs, which decides what that copy
+      # holds. Not the rest of packages/core/swift: EngineTests/,
+      # Package.swift and run-engine-tests.sh are test-only and cannot change this
+      # binary. Hashing those, or the Android sources, would make a test-only
+      # commit force a full iOS rebuild.
+      #
+      # The TOOLCHAIN is part of the key too, and has to be. `latest-stable`
+      # resolves to whatever the image currently offers, so the same sources
+      # produce a different binary as the image moves — and a cache hit would hand
+      # three shards an .app built by a compiler and SDK that are no longer here.
+      # The Xcode version is read from the runner AFTER Select Xcode below, which
+      # is why this step only builds the source half of the key.
+      - name: Compute iOS app cache key (sources)
+        id: appsrc
+        run: echo "sources=${{ hashFiles('packages/core/swift/Engine/**', 'scripts/vendor-engine.mjs', 'packages/react-native/ios/Bridge/**', 'packages/react-native/GroundcoverRum.podspec', 'packages/react-native/react-native.config.js', 'packages/react-native/package.json', 'apps/rn-playground/package.json', 'apps/rn-playground/app.json', 'pnpm-lock.yaml') }}" >> "$GITHUB_OUTPUT"
+      # Pinned to the image's newest stable Xcode rather than its default (26.5),
+      # so the toolchain is stated in the log instead of drifting with the image.
+      # RN 0.86 ships React Native's C++ core as PREBUILT artifacts, so `fmt`
+      # (which fails to compile from source under Apple Clang 21, Xcode 26) is
+      # not a pod and imposes no Xcode ceiling.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: latest-stable
+      - run: xcodebuild -version
+      # Now that the toolchain is selected, fold it into the key. The build number
+      # as well as the marketing version: a beta-to-RC swap can keep the version
+      # and change the compiler.
+      #
+      # The node major is in the key too, and it is not decoration. `expo
+      # prebuild` and autolinking are node programs that GENERATE the native
+      # project, so the node major is a real input to this binary. Without it an
+      # .app built under the previous major hits the cache, `cache-hit != 'true'`
+      # skips the whole build path below, and the native half of a node bump
+      # ships untested.
+      #
+      # Keyed on the major, not the resolved version: keying on 24.13.0 would
+      # bust a full Xcode build on every node patch release, and a patch
+      # release changing codegen is not a real risk.
+      - name: Compute iOS app cache key
+        id: appkey
+        run: |
+          XC=$(xcodebuild -version | tr -d '\n ' )
+          echo "key=${{ runner.os }}-appbin-node${{ env.NODE_VERSION }}-${XC}-${{ steps.appsrc.outputs.sources }}" >> "$GITHUB_OUTPUT"
+      # The engine's pure logic — crash-report mapping, the snapshot store, frame
+      # windowing, gesture geometry, app-start anchoring, config decode. Quick, and
+      # no simulator. It lives on macOS rather than the ubuntu unit job because Swift
+      # needs macOS, and it runs BEFORE the cache restore because it depends on
+      # nothing else here: a regression in it should be reported early rather
+      # than after a full Xcode build that has no bearing on it.
+      # (Files that touch KSCrash or UIKit are excluded from the SwiftPM target;
+      # the e2e suite covers those.)
+      #
+      # Via the script, not `swift test` directly, so this is the same command a
+      # developer runs — it adds the swift-testing paths a Command Line Tools
+      # install needs and is a plain `swift test` under full Xcode.
+      - name: Engine unit tests (Swift)
+        working-directory: packages/core/swift
+        run: ./run-engine-tests.sh
+      # With --no-bundler the JS is served by Metro at runtime, so this .app only
+      # changes when native deps/config change, NOT when specs or JS change. Since
+      # the SDK ships native sources compiled INTO the app, the key hashes those
+      # too — otherwise a native change would e2e-test a stale binary.
+      - name: Restore prebuilt iOS app
+        id: iosapp
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/rn-playground/artifacts/ios
+          key: ${{ steps.appkey.outputs.key }}
+      # ---- everything below runs ONLY on a cache miss ----
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      # The iOS half of the engine's React-free gate (jvm-test is the Android half).
+      # `swift test` above compiles only the pure-logic files; this builds EVERY
+      # engine file — UIKit, KSCrash and the Objective-C boot file included — for
+      # the simulator with no React pod available, so an engine file that imports
+      # React fails here rather than in the next SDK to vendor it. It lints the RN
+      # podspec's Engine subspec, which compiles RN's copy of packages/core/swift,
+      # written here first. SwiftPM cannot do this: a SwiftPM target cannot mix
+      # the Objective-C boot file with the Swift that calls it.
+      #
+      # On a miss only, like the build. The app key hashes everything this reads
+      # (the engine, the podspec, vendor-engine.mjs, the Xcode build), and an entry
+      # is saved only by a run that got past this step, so a hit has passed it
+      # already. It also needs the network (the CocoaPods CDN, KSCrash), which the
+      # hit path otherwise does not.
+      #
+      # Built at iOS 15.1, RN 0.86's own floor, not at what each podspec declares.
+      # Xcode 27 builds nothing below iOS 15.0, and `pod lib lint` builds every pod
+      # at its own declared floor (13.4 for ours, 12.0 for KSCrash), with no
+      # Podfile to raise them the way the app's does — so under `latest-stable`
+      # every target would fail. XCODE_XCCONFIG_FILE is applied by xcodebuild over
+      # every target. This step proves "compiles without React", not the floor.
+      - name: Engine builds without React (pod lib lint)
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        working-directory: packages/react-native
+        env:
+          LANG: en_US.UTF-8
+        run: |
+          node ../../scripts/vendor-engine.mjs
+          pod --version
+          printf 'IPHONEOS_DEPLOYMENT_TARGET = 15.1\n' > "$RUNNER_TEMP/engine-lint.xcconfig"
+          XCODE_XCCONFIG_FILE="$RUNNER_TEMP/engine-lint.xcconfig" \
+            pod lib lint GroundcoverRum.podspec --subspec=Engine --allow-warnings --platforms=ios
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        with:
+          version: 9.15.0
+      - name: pnpm store path
+        id: pnpm-store
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      # Restore-only, no save — see the `lint` job for why, and for which two
+      # jobs own the writes.
+      - name: Restore pnpm store
+        id: pnpm-cache
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+      - name: Install dependencies
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
+      # The pods resolve the SDK out of node_modules, so its dist has to exist
+      # before prebuild runs.
+      - name: Build the SDK dist
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        run: pnpm --filter @groundcover/react-native build
+      # Reuse the CDN spec repo + downloaded pod sources across runs (a cold pod
+      # install is slow). ios/Pods is regenerated by prebuild, but the
+      # sources come from the cache instead of re-downloading.
+      #
+      # ~/Library/Caches/ReactNative is where RN 0.86 keeps the prebuilt artifacts
+      # it ships instead of compiling: React Native core, its C++ dependency
+      # bundle (folly/boost/fmt/glog — not pods at all) and Hermes, debug +
+      # release, large tarballs re-fetched from Maven Central on every cold
+      # run. Safe under the loose `restore-keys` prefix: the downloader
+      # SHA1-verifies each tarball and re-downloads on a miss or mismatch, so an
+      # older run's artifacts can't be used for a newer RN.
+      - name: Cache CocoaPods + RN prebuilt artifacts
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cocoapods
+            ~/Library/Caches/CocoaPods
+            ~/Library/Caches/ReactNative
+          key: ${{ runner.os }}-pods-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pods-
+      # `expo run:ios` picks a target simulator and will try to install onto it, so
+      # one has to exist even though this job only wants the binary. Cheap, and only
+      # on the miss path.
+      - name: Boot an iPhone simulator (for the build's install step)
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        run: |
+          DEVICE=$(xcrun simctl list devices available | grep -m1 "iPhone" | grep -oE "[0-9A-F-]{36}")
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" || true
+      # `expo run:ios` does three things: build, install, then LAUNCH via a
+      # dev-client deep link (`xcrun simctl openurl …://expo-development-client`).
+      # That last step times out on a CI simulator — `NSPOSIXErrorDomain code 60,
+      # Operation timed out` — after "Build Succeeded, 0 error(s)" and a completed
+      # install. Failing the job on that exit would also skip the save below, so
+      # every run would re-pay the full build.
+      #
+      # The shards never need that launch — they install by path and launch by
+      # bundleId — so it is best-effort here, gated on the ARTIFACT instead: no .app
+      # with our bundle id means a real build failure, and that still fails loudly.
+      - name: Build iOS app (cache miss)
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        working-directory: apps/rn-playground
+        run: |
+          npx expo run:ios --no-bundler || echo "::warning::expo run:ios exited non-zero — verifying whether the build itself produced an app"
+          # `|| true`: the step runs under `bash -e`, where a non-zero `find` (an
+          # unreadable DerivedData subtree is enough) would abort before the check
+          # below could report the real problem. Emptiness is the gate, not exit codes.
+          APP=$(find ~/Library/Developer/Xcode/DerivedData -type d -name '*.app' -path '*Debug-iphonesimulator*' | while read -r a; do if /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$a/Info.plist" 2>/dev/null | grep -qx 'com.groundcover.rumplayground'; then echo "$a"; break; fi; done) || true
+          if [ -z "$APP" ]; then
+            echo "::error::no com.groundcover.rumplayground .app in DerivedData — the native build failed"
+            exit 1
+          fi
+          echo "built app: $APP"
+          rm -rf artifacts/ios && mkdir -p artifacts/ios
+          cp -R "$APP" artifacts/ios/
+      # The same .app as an artifact of this run, for the shards to fall back on
+      # when their cache restore comes back empty. The cache is what lets a LATER
+      # run skip this build; within one run it is only the fast path, and a cache
+      # that refuses the save, or restores nothing, must not turn three shards red
+      # over an app that built. Uploaded before the save, so the artifact exists
+      # whatever the save does. Only on the miss path: after a hit, the shards
+      # restore the entry this job just restored, from the same backend.
+      - name: Upload prebuilt iOS app (the shards' fallback)
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rn-playground-ios
+          path: apps/rn-playground/artifacts/ios
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 3
+      # Default success() semantics, not `always()`: a failed build has nothing
+      # worth caching.
+      - name: Save prebuilt iOS app
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/rn-playground/artifacts/ios
+          key: ${{ steps.appkey.outputs.key }}
+
+  e2e-ios:
+    name: E2E — iOS Simulator (shard ${{ matrix.shard }}/3)
+    needs: ios-app
+    # Sharded across JOBS, not workers. The suite drives ONE simulator through one
+    # driver, the mock ingest binds :9393, Metro binds :8081, and the config-preset
+    # mechanism rewrites a single source file and waits for Metro to re-bundle — so
+    # `workers: 1` is mandatory inside a job and the only axis left is more jobs.
+    #
+    # Three shards. Know what the third one costs before adding a fourth: every
+    # shard re-pays a FIXED floor that does NOT divide — simulator boot,
+    # WebDriverAgent warm-up, Metro, pnpm install, .app install, plus
+    # checkout/node/Xcode-select, a sizeable share of each shard's time at this
+    # split. Only the test time divides, so the saving per added shard shrinks
+    # while the cost of a whole extra macOS runner does not: a fourth shard would
+    # pay a whole setup floor to shorten the critical path by only part of
+    # that.
+    #
+    # The Swift engine tests and the app build are not in this floor: the
+    # `ios-app` job pays for them once for the lane.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    # A macOS 26 image: RN 0.86 / Expo 57 need a newer toolchain than macOS 14
+    # images carry (Xcode 16.2, Swift 6.0). RN 0.86's codegen emits a SwiftPM
+    # manifest (ios/build/generated/ios/Package.swift) declaring
+    # swift-tools-version 6.1, which no Xcode before 16.3 can parse; on an older
+    # Xcode the app build fails in xcodebuild's "Prepare packages" phase with
+    # `error: Could not resolve package dependencies:` and no reason attached.
+    # The requirement is a FLOOR, so a newer `-macos-latest` image cannot break
+    # it — but the pinned simulator runtime below can go missing on one, and
+    # fails loudly by design if it does.
+    #
+    # This job and `ios-app` must stay on the SAME fleet: Blacksmith redirects
+    # actions/cache to their own backend, so an .app saved there is invisible to a
+    # GitHub-hosted shard. On a run where `ios-app` hit the cache there is no
+    # artifact to fall back on either, and the install guard below fires.
+    runs-on: blacksmith-12vcpu-macos-latest
+    timeout-minutes: 60
+    env:
+      EXPO_PUBLIC_GC_DSN: http://localhost:9393
+      EXPO_PUBLIC_GC_API_KEY: e2e-key
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Pinned to the image's newest stable Xcode rather than its default (26.5),
+      # so the toolchain is stated in the log instead of drifting with the image.
+      # RN 0.86 ships React Native's C++ core as PREBUILT artifacts, so `fmt`
+      # (which fails to compile from source under Apple Clang 21, Xcode 26) is
+      # not a pod and imposes no Xcode ceiling.
+      - name: Select Xcode
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
+        with:
+          xcode-version: latest-stable
+      - run: xcodebuild -version
+      # HALF ONE OF TWO. `simctl boot` returns as soon as the boot is INITIATED;
+      # it is `simctl bootstatus` (in "Wait for the simulator", below) that blocks
+      # until the device is usable, which takes a while.
+      #
+      # The steps between these two halves need no device at all: the pnpm cache
+      # restore, `pnpm install`, the SDK dist build and Metro's startup. Starting
+      # the boot here lets the simulator come up alongside them, so bootstatus
+      # has less left to wait for.
+      #
+      # DO NOT put anything that touches the device between this step and the wait.
+      # `simctl install`, `simctl launch`, WebDriverAgent and the specs all need a
+      # FULLY booted simulator, which is the entire reason the wait exists — see
+      # its comment for what breaks without it.
+      - name: Start the simulator booting (does not wait — see "Wait for the simulator")
+        run: |
+          # A FRESH device on a PINNED runtime, not `grep -m1 iPhone` over the
+          # image's pre-made devices. That picker takes whichever iPhone comes
+          # first, and simctl lists runtimes oldest-first, so it would test on
+          # the oldest iOS the image carries and reuse a device with whatever
+          # state previous jobs left on it — a combination that can fail every
+          # spec on "timed out waiting for WebDriverAgent to be ready". Pinning
+          # also states the iOS version under test instead of inheriting it.
+          RUNTIME=com.apple.CoreSimulator.SimRuntime.iOS-26-5
+          if ! xcrun simctl list runtimes | grep -q "$RUNTIME"; then
+            echo "::error::$RUNTIME is gone from this image — pick the new pin deliberately, do not fall back silently"
+            xcrun simctl list runtimes
+            exit 1
+          fi
+          # Shut every other device down first. mobilewright does NOT take the
+          # udid we boot — mobilewright.config.ts selects by `deviceName: /iPhone/`
+          # — so leaving other iPhones running lets it attach to one this job
+          # never installed the app or the agent on.
+          xcrun simctl shutdown all || true
+          # The name MUST contain "iPhone" for that same reason: under any other
+          # name the workflow boots one device and mobilewright waits on a
+          # different one, which shows up as a silent hang.
+          DEVICE=$(xcrun simctl create "iPhone 17 Pro e2e" \
+            com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro "$RUNTIME")
+          echo "SIM_UDID=$DEVICE" >> "$GITHUB_ENV"
+          echo "Booting fresh $DEVICE on $RUNTIME in the background"
+          xcrun simctl boot "$DEVICE" || true
+      # The Swift engine tests do NOT run here — the `ios-app` job runs them once
+      # for the whole lane. Same for the app build.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 9.15.0
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      # Restore-only here; this job owns the macOS save below.
+      - name: Restore pnpm store
+        id: pnpm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+      - run: pnpm install --frozen-lockfile
+      # Owns the macOS pnpm store write. See the `lint` job for the reasoning.
+      - name: Save pnpm store
+        if: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 && steps.pnpm-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+      # Metro bundles the app's JS out of this dist at runtime, so it IS needed per
+      # shard — unlike the pod cache, which only the `ios-app` build path uses.
+      - name: Build the SDK dist the app consumes
+        run: pnpm --filter @groundcover/react-native build
+      # Metro before the boot WAIT, deliberately: it binds a host port and needs no
+      # device, so its startup overlaps the simulator boot instead of following
+      # it.
+      #
+      # CI=false is LOAD-BEARING, not tidiness. Actions sets CI=true on every
+      # runner, and Expo reads it to turn Metro's file watcher off outright
+      # (`isWatchEnabled()` in @expo/cli — "Metro is running in CI mode, reloads
+      # are disabled"). The config-preset mechanism rewrites
+      # apps/rn-playground/src/e2e-preset.ts and relies on the next relaunch
+      # fetching a re-bundled JS; with watching off Metro would serve the bundle
+      # it built first, forever, so every preset spec would boot the app on
+      # `default` and fail its readback gate — on both platforms, while passing
+      # locally where CI is unset. Only this process needs it: the rest of the job
+      # should keep CI=true.
+      - name: Start Metro
+        working-directory: apps/rn-playground
+        env:
+          CI: 'false'
+        run: |
+          nohup npx expo start --port 8081 > metro.log 2>&1 &
+          npx wait-on http://localhost:8081/status -t 180000
+      # HALF TWO OF TWO — the blocking half, and the LAST step before anything
+      # touches the device.
+      #
+      # Block until the sim is FULLY booted. Without this, tests start on a
+      # half-settled sim and WebDriverAgent's slow cold start races the first
+      # tests — they time out waiting for WDA, then it comes up and the rest pass.
+      #
+      # Everything below needs a booted device — `simctl install`, `simctl launch`,
+      # WebDriverAgent, the specs — so nothing device-dependent may be inserted
+      # ABOVE this step. See "Start the simulator booting" for the other half.
+      #
+      # Every device command below names "$SIM_UDID" rather than `booted`: with a
+      # second booted simulator, `booted` could prove readiness for one device
+      # while the tests ran on another. An unset variable is a hard failure here,
+      # which is the cheapest place to discover it.
+      - name: Wait for the simulator to finish booting
+        run: |
+          if [ -z "$SIM_UDID" ]; then
+            echo "::error::SIM_UDID is empty — 'Start the simulator booting' did not export a device"
+            exit 1
+          fi
+          xcrun simctl bootstatus "$SIM_UDID"
+          xcrun simctl list devices | grep -i booted || true
+      # Restore ONLY — this job never builds. The `ios-app` job it `needs` has
+      # already either hit this same key or built the app and saved it. Keyed off
+      # that job's output rather than a local hashFiles so the two cannot drift.
+      - name: Restore prebuilt iOS app
+        id: iosapp
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/rn-playground/artifacts/ios
+          key: ${{ needs.ios-app.outputs.key }}
+      # The fallback for a miss: the artifact `ios-app` uploads on every run that
+      # built the app, so a cache that lost or refused the save costs a download,
+      # not the shard. Allowed to fail: after a cache hit in `ios-app` there is no
+      # artifact, and the install step below names the miss.
+      - name: Download prebuilt iOS app (cache miss)
+        if: steps.iosapp.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rn-playground-ios
+          path: apps/rn-playground/artifacts/ios
+      # Fail loudly rather than fall back to building. A per-shard build would
+      # have three shards each paying a full xcodebuild on costly macOS runners. If
+      # this fires, neither the cache nor the artifact had the app (an entry
+      # `ios-app` restored that this shard could not), and a red X naming it beats
+      # runner time hiding it.
+      - name: Install the prebuilt iOS app
+        run: |
+          APP=$(ls -d apps/rn-playground/artifacts/ios/*.app 2>/dev/null | head -1)
+          if [ -z "$APP" ]; then
+            echo "::error::no prebuilt .app from the cache (key ${{ needs.ios-app.outputs.key }}) or from the ios-app job's artifact"
+            exit 1
+          fi
+          xcrun simctl install "$SIM_UDID" "$APP" || { echo "::error::simctl install failed"; exit 1; }
+      # Launch the app once so the sim's UI/graphics stack is warm before
+      # mobilewright connects and spins up WebDriverAgent (mobilewright will
+      # terminate + relaunch per test; this is only a warm-up).
+      - name: Warm the simulator
+        run: |
+          xcrun simctl launch "$SIM_UDID" com.groundcover.rumplayground || true
+          sleep 3
+      # WebDriverAgent's one-time cold start is slow and the RpcError fires at AGENT
+      # START, before any spec body — so `00-warmup` only absorbs it for whichever
+      # shard happens to contain that file. Running it unsharded first gives every
+      # shard a warm WDA for the price of one launch. Best-effort: if it fails the
+      # sharded run below still has `retries: 2` to fall back on.
+      # Install the WDA runner app BEFORE any spec runs, because a freshly created
+      # device does not have it and mobilewright otherwise does it lazily inside
+      # the `device` fixture — where it is bounded by the 120s per-test timeout.
+      # On a slow runner that one-time cost can reach the limit and fail the
+      # warm-up spec with "Test timeout of 120000ms exceeded while setting up
+      # device". It is a download plus a simctl install, so it belongs in a step
+      # with no test clock on it.
+      #
+      # Through the package's launcher, not a binary path: since mobilecli 1.0.7
+      # each platform's binary is its own optional dependency
+      # (@mobilenext/mobilecli-darwin-arm64), and `mobilecli/bin` is empty.
+      - name: Install the WebDriverAgent runner
+        run: |
+          node_modules/.bin/mobilecli \
+            agent install --device "$SIM_UDID" -v
+      - name: Warm WebDriverAgent
+        continue-on-error: true
+        run: npx mobilewright test --project=rn-ios tests/e2e/mobile/00-bootstrap/00-warmup.spec.ts
+      - name: Run Mobilewright e2e (iOS shard ${{ matrix.shard }}/3)
+        run: npx mobilewright test --project=rn-ios --shard=${{ matrix.shard }}/3
+      - name: Metro log (on failure)
+        if: ${{ failure() }}
+        run: cat apps/rn-playground/metro.log || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: ${{ !cancelled() }}
+        with:
+          name: mobilewright-report-ios-shard-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 14
+
+  # The Android counterpart of `ios-app`: build the debug apk exactly ONCE for the
+  # whole lane, on a runner with no emulator on it.
+  #
+  # Built per shard, a native change would run the same Gradle build on all
+  # three. ubuntu runners are cheap so the money is minor; the resource that
+  # runs out is DISK: a build plus an emulator and an AVD snapshot on one
+  # runner can leave "not enough disk space to run avd".
+  #
+  # Builds with `expo prebuild` + `gradlew assembleDebug` rather than
+  # `expo run:android`, because run:android also installs and launches, which needs
+  # a device this job deliberately does not have. Same two phases run:android would
+  # perform internally — apps/rn-playground/android is generated, not committed, so
+  # prebuild has to come first.
+  android-app:
+    name: Android apk (once)
+    needs: lint
+    runs-on: blacksmith-16vcpu-ubuntu-2204
+    timeout-minutes: 40
+    outputs:
+      key: ${{ steps.appkey.outputs.key }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The prebuilt-apk cache key, computed ONCE here and exported as a job output
+      # so every shard's restore uses the identical string. Computed in two places
+      # it can disagree: `hashFiles` walks the FILESYSTEM and ignores .gitignore,
+      # so a `packages/react-native/android/**` glob would pick up the `build/`
+      # and `.cxx/` output Gradle writes into the library module BETWEEN the
+      # restore and the save, and every apk cached would be unreachable. A job
+      # output removes the second computation entirely.
+      #
+      # Scoped to what the apk compiles: RN's android/src/main (the bridge) and the
+      # engine's source, packages/core/kotlin/src/main. RN's copy of the engine
+      # is git-ignored and written at install, after this key is computed, so the
+      # source is what has to be hashed, along with scripts/vendor-engine.mjs,
+      # which decides what the copy holds. Not the engine's tests or jvm-test/,
+      # which are never in the apk, and not the iOS sources (a Swift-only commit
+      # must not force a full Android rebuild).
+      # Node major included for the same reason as the iOS key above: prebuild
+      # and autolinking are node programs that generate the project Gradle then
+      # builds.
+      #
+      # `v2` is a manual generation: bump it to abandon an entry that stalls or
+      # fails to restore. The entries live in Blacksmith's cache, which `gh cache`
+      # cannot see or delete, so a new key is the only way to force a fresh build
+      # and save.
+      - name: Compute Android app cache key
+        id: appkey
+        run: echo "key=${{ runner.os }}-appbin-v2-node${{ env.NODE_VERSION }}-${{ hashFiles('packages/react-native/android/src/main/**', 'packages/core/kotlin/src/main/**', 'scripts/vendor-engine.mjs', 'packages/react-native/android/build.gradle', 'packages/react-native/react-native.config.js', 'packages/react-native/package.json', 'apps/rn-playground/package.json', 'apps/rn-playground/app.json', 'pnpm-lock.yaml') }}" >> "$GITHUB_OUTPUT"
+      - name: Restore prebuilt Android app
+        id: androidapp
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/rn-playground/artifacts/android
+          key: ${{ steps.appkey.outputs.key }}
+      # ---- everything below runs ONLY on a cache miss ----
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        with:
+          version: 9.15.0
+      - name: pnpm store path
+        id: pnpm-store
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      # Restore-only, no save — see the `lint` job for why, and for which two
+      # jobs own the writes.
+      - name: Restore pnpm store
+        id: pnpm-cache
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install dependencies
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        run: pnpm install --frozen-lockfile
+      # Gradle resolves the SDK's android module out of node_modules, so its dist
+      # has to exist before prebuild wires the autolinked project in.
+      - name: Build the SDK dist
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        run: pnpm --filter @groundcover/react-native build
+      # Downloaded dependencies + the wrapper distribution only, NOT all of
+      # ~/.gradle/caches. The wider path sweeps in build-cache-1, transforms-* and
+      # jars-*, which grow the entry run over run against GitHub's 10 GiB per-repo
+      # budget, slow the restore, and evict the small caches that actually save
+      # build time.
+      #
+      # Keyed on the files that decide what Gradle downloads (the app's manifest,
+      # the lockfile that pins the RN/Expo native versions, and the library
+      # module's own build.gradle) rather than on pnpm-lock.yaml alone. Enumerated
+      # explicitly instead of `**/*.gradle`: prebuild generates the app's Gradle
+      # files later in this job, and a filesystem glob that picks up build output is
+      # the failure described on the cache key above.
+      - name: Cache Gradle
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches/modules-2
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('packages/react-native/android/build.gradle', 'apps/rn-playground/package.json', 'pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-gradle-
+      - name: Build the Android apk (cache miss)
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        working-directory: apps/rn-playground
+        run: |
+          # apps/rn-playground/android is generated, not committed.
+          npx expo prebuild --platform android || { echo "::error::expo prebuild failed"; exit 1; }
+          # assembleDebug only — no install, no launch, no device. --no-daemon
+          # because this container is discarded the moment the step ends.
+          #
+          # reactNativeArchitectures pinned to x86_64, matching `arch: x86_64` on the
+          # emulator steps below. It has to be stated explicitly here: `expo
+          # run:android` infers the ABI from the attached device and builds only
+          # that one, and this job has no device to infer from, so a bare
+          # assembleDebug builds all four — a much larger cache entry, restored by
+          # three shards (see the Gradle cache note above on eviction), plus three
+          # ABIs of native compilation nobody runs.
+          ( cd android && ./gradlew assembleDebug --no-daemon -PreactNativeArchitectures=x86_64 ) || { echo "::error::gradlew assembleDebug failed"; exit 1; }
+          APK=android/app/build/outputs/apk/debug/app-debug.apk
+          if [ ! -f "$APK" ]; then
+            echo "::error::assembleDebug reported success but $APK is missing"
+            exit 1
+          fi
+          mkdir -p artifacts/android
+          cp "$APK" artifacts/android/ || { echo "::error::apk copy failed"; exit 1; }
+          ls -la artifacts/android/
+      # The shards' fallback, as in `ios-app`: the apk as an artifact of this run,
+      # uploaded before the save so it exists whatever the save does, and only on
+      # the miss path.
+      - name: Upload prebuilt Android app (the shards' fallback)
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: rn-playground-android
+          path: apps/rn-playground/artifacts/android
+          if-no-files-found: error
+          overwrite: true
+          retention-days: 3
+      # Default success() semantics, deliberately: a failed build has nothing worth
+      # caching.
+      - name: Save prebuilt Android app
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/rn-playground/artifacts/android
+          key: ${{ steps.appkey.outputs.key }}
+
+  e2e-android:
+    name: E2E — Android Emulator (shard ${{ matrix.shard }}/3)
+    # Gated on both off-device Android gates: the Kotlin engine unit tests, and the
+    # single apk build. No emulator boots until the engine's own logic passes and a
+    # binary exists to install.
+    needs: [android-unit, android-app]
+    # Same constraint as iOS (one device, one ingest port, one preset file →
+    # workers:1 per job), but ubuntu runners are cheap so a third shard is too.
+    # The cost that is NOT cheap is reliability: every shard boots its own
+    # emulator, so each shard adds exposure to emulator boot failures (see the
+    # AVD snapshot steps below).
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    # Pin 22.04: on 24.04 the emulator can fail AVD create/boot intermittently or
+    # die mid-boot — reactivecircus/android-emulator-runner#400.
+    runs-on: blacksmith-16vcpu-ubuntu-2204
+    # Worst case is one pass: the install and SDK build, the AVD warm-snapshot
+    # step on a cache miss (capped at 20 minutes), and the e2e step (capped at
+    # 35). The cap is a backstop, not a budget.
+    timeout-minutes: 65
+    env:
+      EXPO_PUBLIC_GC_DSN: http://10.0.2.2:9393
+      EXPO_PUBLIC_GC_API_KEY: e2e-key
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+        with:
+          version: 9.15.0
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      # Restore-only, no save — see the `lint` job for why, and for which two
+      # jobs own the writes.
+      - name: Restore pnpm store
+        id: pnpm-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+      # No setup-java and no Gradle cache here: this job builds nothing.
+      # `android-app` owns the one build for the whole lane.
+      - run: pnpm install --frozen-lockfile
+      # Metro bundles the app's JS out of this dist at runtime, so it IS needed per
+      # shard.
+      - name: Build the SDK dist the app consumes
+        run: pnpm --filter @groundcover/react-native build
+      - name: Enable KVM (emulator acceleration)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+      # Restore ONLY — the `android-app` job this `needs` has already either hit
+      # this key or built the apk and saved it. Keyed off that job's output rather
+      # than a local hashFiles, so restore and save cannot disagree.
+      - name: Restore prebuilt Android app
+        id: androidapp
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: apps/rn-playground/artifacts/android
+          key: ${{ needs.android-app.outputs.key }}
+      # The fallback for a miss, as in `e2e-ios`: the artifact `android-app`
+      # uploads on every run that built the apk. Allowed to fail: after a cache hit
+      # there is no artifact, and the next step names the miss.
+      - name: Download prebuilt Android app (cache miss)
+        if: steps.androidapp.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: rn-playground-android
+          path: apps/rn-playground/artifacts/android
+      # Fail here rather than let the emulator script fall back to building.
+      #
+      # ci-android-e2e.sh KEEPS that fallback on purpose — it is what makes the
+      # script usable locally, where a developer has no cached apk and does want it
+      # built. But in CI the fallback would mean three shards each running the same
+      # Gradle build, on runners that also have to hold an emulator and an AVD
+      # snapshot, which can leave "not enough disk space to run avd". So the guard
+      # lives in the workflow, not the script: local keeps its convenience, CI
+      # gets a red X naming the real problem.
+      - name: Verify the prebuilt apk is present
+        run: |
+          APK=apps/rn-playground/artifacts/android/app-debug.apk
+          if [ ! -f "$APK" ]; then
+            echo "::error::no prebuilt apk from the cache (key ${{ needs.android-app.outputs.key }}) or from the android-app job's artifact"
+            exit 1
+          fi
+          ls -la "$APK"
+      # AVD snapshot cache, against the intermittent COLD-boot crash (QEMU dies
+      # mid-boot -> "device 'emulator-5554' not found" loop), which the 22.04 pin
+      # alone does not prevent. Generate a warm snapshot once (on cache miss),
+      # cache it (saved even on later test failure), then the run steps restore it
+      # and boot from the snapshot (-no-snapshot-save) — far more reliable than
+      # cold-booting every run.
+      #
+      # The snapshot only works with the emulator build that wrote it: a newer one
+      # rejects it ("incompatible snapshot version") and cold-boots every shard,
+      # with a taller status bar that moves controls below the fold. So both steps
+      # that start an emulator pin env.ANDROID_EMULATOR_BUILD, and the key names it.
+      - name: Restore AVD snapshot
+        id: avd-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-34-emu${{ env.ANDROID_EMULATOR_BUILD }}
+      - name: Create AVD + warm snapshot (cache miss)
+        id: avd-create
+        if: steps.avd-cache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        timeout-minutes: 20
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_6
+          emulator-build: ${{ env.ANDROID_EMULATOR_BUILD }}
+          force-avd-creation: false
+          emulator-boot-timeout: 300
+          # No -no-snapshot here: this cold boot SAVES a snapshot on exit.
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -camera-front none
+          disable-animations: false
+          script: echo "AVD warm snapshot generated."
+      # Gated on the create step SUCCEEDING, not on always(). The create step is
+      # `continue-on-error` with a 20-minute cap, so on a timeout or a mid-boot
+      # death `always()` would save whatever partial AVD state existed — under
+      # a literal key with no content hash and no run identity. That one bad
+      # save would then be restored by every later run of every shard until a
+      # manual key bump.
+      - name: Save AVD snapshot
+        if: steps.avd-create.outcome == 'success' && steps.avd-cache.outputs.cache-hit != 'true' && matrix.shard == 1
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.android/avd/*
+            ~/.android/adb*
+          key: avd-34-emu${{ env.ANDROID_EMULATOR_BUILD }}
+      # Free the space the emulator needs. A cache-miss run holds node_modules,
+      # the Gradle caches, the Android SDK, the built apk AND the AVD at once,
+      # which can make the emulator refuse to start with "not enough disk space
+      # to run avd". These toolchains are unrelated to an RN Android build.
+      # (The NDK is deliberately NOT removed — expo-modules-core compiles native
+      # code with it.)
+      - name: Free runner disk space
+        run: |
+          df -h / | tail -1
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/share/swift \
+                      /opt/hostedtoolcache/CodeQL || true
+          df -h / | tail -1
+      # Metro is deliberately NOT hoisted out of ci-android-e2e.sh here, unlike the
+      # iOS job which starts it early on purpose.
+      #
+      # Overlapping Metro's startup with the emulator boot is not possible here:
+      # the boot happens INSIDE the android-emulator-runner step and Actions steps
+      # are serial, so a Metro step placed before that action runs before the
+      # boot, not alongside it. (The iOS equivalent works because `simctl boot`
+      # hands the boot to a background OS process, which genuinely does continue
+      # across later steps.) Metro also starts quickly on ubuntu, so there is
+      # little to win.
+      #
+      # Run the e2e body (extracted to a script so it isn't duplicated). Boots
+      # FROM the warm snapshot (-no-snapshot-save = load, don't re-save), which
+      # keeps boots reliable; the short boot timeout keeps a bad one from
+      # burning the job's budget polling a dead device.
+      #
+      # No retry: with boots reliable, a second attempt would only mask a real
+      # failure, and it doubles the worst-case job time. A genuinely bad boot
+      # should fail the job and be re-run by hand.
+      #
+      # 35 minutes: on a software-GPU emulator every spec runs much slower than
+      # locally, so a tighter cap can kill the step mid-suite with everything
+      # passing. It covers no Gradle build: the apk is built once in
+      # `android-app`, and `Verify the prebuilt apk is present` fails this job
+      # before the script's build fallback can run.
+      - name: Run e2e on an Android emulator
+        timeout-minutes: 35
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        env:
+          # The emulator wrapper otherwise waits 20s for a graceful shutdown that
+          # never comes under software GPU; cut it to 1s.
+          ANDROID_EMULATOR_WAIT_TIME_BEFORE_KILL: "1"
+        with:
+          api-level: 34
+          arch: x86_64
+          profile: pixel_6
+          emulator-build: ${{ env.ANDROID_EMULATOR_BUILD }}
+          force-avd-creation: false
+          emulator-boot-timeout: 150
+          emulator-options: -no-snapshot-save -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-metrics -camera-back none -camera-front none
+          disable-animations: true
+          script: MW_SHARD=${{ matrix.shard }}/3 bash tests/e2e/mobile/ci-android-e2e.sh
+      - name: Metro log (on failure)
+        if: ${{ failure() }}
+        run: cat apps/rn-playground/metro.log || true
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        # !cancelled(), not always(): a cancelled run's partial results are the
+        # one case nobody wants the bytes for. Matches the iOS shard above.
+        if: ${{ !cancelled() }}
+        with:
+          name: mobilewright-report-android-shard-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 14
+
+  # The required status check for this lane.
+  #
+  # It reports on EVERY PR, including web-only ones where the whole lane is
+  # skipped — which is why the path filter is not on the `pull_request`
+  # trigger. It also gives the lane ONE stable name: the e2e jobs
+  # carry their shard count, so pinning those in a required-checks list breaks
+  # the moment the count changes.
+  gate:
+    name: RN CI
+    needs: [changes, lint, unit, android-unit, ios-app, e2e-ios, android-app, e2e-android]
+    if: ${{ !cancelled() }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      # `if: !cancelled()` is what makes this correct. A plain `needs:` would SKIP
+      # this job when a dependency failed, and a skipped job reports Success — a
+      # false green on a red lane.
+      #
+      # "success or skipped" is right because a job skipped by the filter reports
+      # `skipped`, and so does a job whose dependency failed — but the job that
+      # actually FAILED reports `failure`, so a real break is still caught. It
+      # also catches `changes` itself failing, which requiring the leaf jobs
+      # alone would not.
+      - name: Check lane results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq .
+          echo "$RESULTS" | jq -e 'to_entries
+            | all(.value.result == "success" or .value.result == "skipped")' > /dev/null

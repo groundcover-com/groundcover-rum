@@ -1,0 +1,17 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <!-- No permissions: ApplicationExitInfo and the watchdogs need none, and the
+       library must never widen the host app's permission set. -->
+
+  <application>
+    <!-- Runs before Application.onCreate, which is the only way to stamp launch
+         timings that would otherwise already be gone by the time any app-level
+         hook (let alone JavaScript) runs. Provides no data — being a provider is
+         purely how it gets to run that early. The authority is namespaced with
+         ${applicationId} so two apps on one device never collide. -->
+    <provider
+        android:name="com.groundcover.rum.engine.appstart.GcRumStartupProvider"
+        android:authorities="${applicationId}.groundcoverrum.startup"
+        android:exported="false"
+        android:initOrder="100" />
+  </application>
+</manifest>
