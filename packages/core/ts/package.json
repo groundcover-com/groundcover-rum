@@ -1,0 +1,34 @@
+{
+  "name": "@groundcover/rum-core",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Platform-agnostic core of the groundcover RUM SDK: config, session policy, event enrichment, batching, redaction and transport. Consumed as TypeScript source by the platform packages and inlined into their bundles.",
+  "license": "MIT",
+  "author": "groundcover",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./*": "./src/*.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "test": "vitest run && tsc --noEmit -p tsconfig.tests.json && eslint . && npm run lint:gate",
+    "lint": "eslint .",
+    "typecheck:tests": "tsc --noEmit -p tsconfig.tests.json",
+    "lint:gate": "node lint-fixtures/verify-gate.mjs"
+  },
+  "dependencies": {
+    "error-stack-parser": "2.1.4",
+    "fflate": "0.8.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.19.0",
+    "@types/node": "^22.13.5",
+    "eslint": "^9.19.0",
+    "globals": "^15.14.0",
+    "typescript": "~5.7.2",
+    "typescript-eslint": "^8.22.0",
+    "vitest": "^3.0.8"
+  }
+}

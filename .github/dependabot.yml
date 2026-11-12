@@ -1,0 +1,20 @@
+version: 2
+updates:
+  # Keeps the workflows' and composite actions' commit-SHA pins current. Every `uses:` names a
+  # commit with its release as a comment (`@<sha> # v4.4.0`); Dependabot moves both together.
+  - package-ecosystem: github-actions
+    directories:
+      - /
+      - /.github/actions/*
+    schedule:
+      interval: weekly
+    # A release has to be a week old before it is proposed, so a hijacked release is likely to be
+    # caught and pulled before it lands here.
+    cooldown:
+      default-days: 7
+    groups:
+      actions:
+        patterns:
+          - "*"
+    commit-message:
+      prefix: "CI"

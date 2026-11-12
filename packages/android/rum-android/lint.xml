@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Android lint's configuration for rum-android, which also lints the engine it compiles from
+     packages/core/kotlin. -->
+<lint>
+    <!-- GcRumEngine.stop() calls GcRumFrameTracker.stop() (@RequiresApi 24) through a field that
+         is only ever set on API 24 and up, which lint can't follow. Ignored for that call alone.
+         A version guard in the engine would also clear it, but it would change the engine React
+         Native and Flutter ship. -->
+    <issue id="NewApi">
+        <ignore path="**/rum/engine/GcRumEngine.kt" regexp="requires API level 24 \(current min is 23\): stop$" />
+    </issue>
+</lint>

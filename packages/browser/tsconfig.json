@@ -1,0 +1,39 @@
+{
+  "exclude": ["tests/**/*", "dist", "node_modules"],
+  "include": ["./src/**/*"],
+  "compilerOptions": {
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "target": "ES2020",
+    "allowJs": true,
+    "moduleDetection": "force",
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+
+    "moduleResolution": "node",
+    "module": "esnext",
+    "outDir": "dist",
+    "sourceMap": true,
+
+    "declaration": true,
+
+    // Not composite: this package type-checks core's TS source through the
+    // paths aliases below (cross-package rootDir), and emits via tsup — both
+    // tsup's dts step and tsconfig.dts.json already run with composite:false.
+    "declarationMap": true,
+
+    "noEmit": true,
+
+    "lib": ["es2022", "dom", "dom.iterable"],
+
+    "paths": {
+      "@/*": ["./src/*"],
+      "@groundcover/rum-core": ["../core/ts/src/index.ts"],
+      "@groundcover/rum-core/*": ["../core/ts/src/*"]
+    }
+  }
+}

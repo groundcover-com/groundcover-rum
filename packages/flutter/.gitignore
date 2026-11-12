@@ -1,0 +1,41 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Flutter/Dart/Pub related
+# Libraries should not include pubspec.lock, per https://dart.dev/guides/libraries/private-files#pubspeclock.
+/pubspec.lock
+**/doc/api/
+.dart_tool/
+.flutter-plugins-dependencies
+/build/
+/coverage/
+
+# The native engine, written from packages/core by scripts/vendor-engine.mjs
+# (the root `prepare`, CI before every native build, and the publish workflow).
+# Edit the engine under packages/core/{swift,kotlin}; this copy is overwritten.
+# .pubignore repeats this file without these lines, so the copy ships to pub.dev.
+/ios/groundcover_rum/Sources/groundcover_rum/Engine/
+/ios/groundcover_rum/Sources/GroundcoverRumBoot/
+/android/src/main/kotlin/com/groundcover/rum/engine/

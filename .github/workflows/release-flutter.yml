@@ -1,0 +1,109 @@
+name: Release groundcover_rum
+
+# Releases groundcover_rum (packages/flutter) to pub.dev: run it by hand on
+# main (Actions → this workflow → Run workflow). It reads the version from
+# packages/flutter/pubspec.yaml, checks that the package agrees on it, tags the
+# commit `groundcover_rum-v<version>`, and starts publish-flutter.yml on that
+# tag, which validates the package again and publishes it.
+#
+# The publish has to run on the tag because pub.dev accepts an automated publish
+# only from a run whose ref is a tag matching the package's tag pattern
+# (`groundcover_rum-v{{version}}`), even a run started by hand. The job's own
+# token is enough for both steps: it can create the tag, and although an event
+# made with it (such as that tag's push) starts no workflow, a workflow_dispatch
+# made with it does.
+#
+# If publish-flutter.yml fails after the tag exists, fix the cause and re-run its
+# failed job; if main has to change, delete the tag and run this again.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-flutter
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Tag the release and start the publish
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      contents: write # create the tag
+      actions: write # start publish-flutter.yml
+    steps:
+      - name: Releases come from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::run this on main, not $GITHUB_REF_NAME: the tagged commit is what gets published"
+          exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: The pubspec, the SDK's own version and the podspec say the same
+        id: version
+        run: |
+          set -euo pipefail
+          pubspec=$(sed -n 's/^version:[[:space:]]*//p' packages/flutter/pubspec.yaml)
+          dart=$(sed -n "s/^const sdkVersion = '\(.*\)';/\1/p" packages/flutter/lib/src/version.dart)
+          pod=$(sed -n "s/^[[:space:]]*s\.version[[:space:]]*=[[:space:]]*'\(.*\)'/\1/p" packages/flutter/ios/groundcover_rum.podspec)
+          echo "pubspec=$pubspec version.dart=$dart podspec=$pod"
+          if ! [[ "$pubspec" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$pubspec' is not a version pub accepts"
+            exit 1
+          fi
+          if [ "$dart" != "$pubspec" ] || [ "$pod" != "$pubspec" ]; then
+            echo "::error::bump packages/flutter's lib/src/version.dart and the podspec to $pubspec too"
+            exit 1
+          fi
+          echo "version=$pubspec" >> "$GITHUB_OUTPUT"
+          echo "tag=groundcover_rum-v$pubspec" >> "$GITHUB_OUTPUT"
+      - name: The CHANGELOG has an entry for it
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if ! grep -qE "^## ${VERSION//./\\.}([[:space:]]|$)" packages/flutter/CHANGELOG.md; then
+            echo "::error::packages/flutter/CHANGELOG.md has no '## $VERSION' entry"
+            exit 1
+          fi
+      # Through the API, at the commit checked above. A tag already at this
+      # commit is a re-run of this job, and passes; one anywhere else is a
+      # version that was released before.
+      - name: Tag ${{ steps.version.outputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -o "$RUNNER_TEMP/ref.json" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")
+          case "$status" in
+            404)
+              gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA" > /dev/null
+              echo "Tagged $TAG at $SHA." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            200)
+              existing=$(jq -r .object.sha "$RUNNER_TEMP/ref.json")
+              if [ "$existing" != "$SHA" ]; then
+                echo "::error::$TAG already points at $existing, not $SHA: that version was released; bump the pubspec"
+                exit 1
+              fi
+              echo "$TAG is already at $SHA." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              echo "::error::couldn't check whether $TAG exists (HTTP $status)"
+              exit 1
+              ;;
+          esac
+      - name: Start publish-flutter.yml on ${{ steps.version.outputs.tag }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh workflow run publish-flutter.yml --repo "$GITHUB_REPOSITORY" --ref "$TAG"
+          echo "Started publish-flutter.yml on $TAG: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/workflows/publish-flutter.yml" >> "$GITHUB_STEP_SUMMARY"

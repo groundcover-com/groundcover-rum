@@ -1,0 +1,23 @@
+diff --git a/dist/launchers.js b/dist/launchers.js
+index 5f13687f79c33c90ab8ee837b8c422dbbc7418a0..974344045e179c8d51dc56a14c6cd79a05153810 100644
+--- a/dist/launchers.js
++++ b/dist/launchers.js
+@@ -1,3 +1,5 @@
++// PATCHED by groundcover-com/groundcover-rum (patches/mobilewright@0.0.62.patch; see patches/README.md):
++// terminateAppIfRunning also tolerates the iOS simulator's not-running error.
+ import { Device } from '@mobilewright/core';
+ import { MobilecliDriver, DEFAULT_URL } from '@mobilewright/driver-mobilecli';
+ import { toArray } from './config.js';
+@@ -43,7 +45,11 @@ export async function terminateAppIfRunning(device, bundleId) {
+         await device.terminateApp(bundleId);
+     }
+     catch (error) {
+-        const isNotRunning = error instanceof Error && error.message.includes(`process of ${bundleId} not found`);
++        // groundcover patch: the simulator reports a stopped app too, as `xcrun simctl terminate`'s
++        // exit status 3 ("found nothing to terminate"), which mobilecli 1.0.16 passes on bare.
++        const isNotRunning = error instanceof Error &&
++            (error.message.includes(`process of ${bundleId} not found`) ||
++                error.message.includes('xcrun simctl command: exit status 3'));
+         if (!isNotRunning) {
+             throw error;
+         }

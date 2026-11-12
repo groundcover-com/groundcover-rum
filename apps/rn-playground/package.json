@@ -1,0 +1,40 @@
+{
+  "name": "rn-playground",
+  "private": true,
+  "version": "0.0.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start",
+    "dev": "expo start",
+    "android": "node ../../scripts/vendor-engine.mjs && expo run:android",
+    "ios": "node ../../scripts/vendor-engine.mjs && expo run:ios",
+    "lint": "tsc --noEmit",
+    "prebuild": "node ../../scripts/vendor-engine.mjs && expo prebuild",
+    "device:android": "node ../../scripts/vendor-engine.mjs && expo run:android --variant release",
+    "device:android:apk": "node ../../scripts/vendor-engine.mjs && expo prebuild --platform android && cd android && ./gradlew assembleRelease && echo \"APK: $(cd .. && pwd)/android/app/build/outputs/apk/release/app-release.apk\"",
+    "//device:ios": "Physical iPhone, real cluster. Prereqs one-time in Xcode: open ios/*.xcworkspace, sign in your Apple ID (the one on the phone), set a unique bundle id + your team on the target. Then, per build, pass that bundle id + team here. Uses xcodebuild directly, NOT expo run:ios, because prebuild would reset the custom bundle id back to app.json.",
+    "device:ios": "node ../../scripts/vendor-engine.mjs && cd ios && xcodebuild -workspace groundcoverRUMplayground.xcworkspace -scheme groundcoverRUMplayground -configuration Release -destination \"id=${GC_IOS_DEVICE_ID:?set GC_IOS_DEVICE_ID (xcrun xctrace list devices)}\" -allowProvisioningUpdates -derivedDataPath build DEVELOPMENT_TEAM=\"${GC_IOS_TEAM:?set GC_IOS_TEAM}\" PRODUCT_BUNDLE_IDENTIFIER=\"${GC_IOS_BUNDLE_ID:?set GC_IOS_BUNDLE_ID}\" build && xcrun devicectl device install app --device \"$GC_IOS_DEVICE_ID\" build/Build/Products/Release-iphoneos/groundcoverRUMplayground.app",
+    "e2e:app:ios": "node ../../scripts/vendor-engine.mjs && EXPO_PUBLIC_GC_PRESET= EXPO_PUBLIC_GC_DSN=http://localhost:9393 EXPO_PUBLIC_GC_API_KEY=e2e-key expo run:ios",
+    "e2e:app:android": "node ../../scripts/vendor-engine.mjs && EXPO_PUBLIC_GC_PRESET= EXPO_PUBLIC_GC_DSN=http://10.0.2.2:9393 EXPO_PUBLIC_GC_API_KEY=e2e-key expo run:android"
+  },
+  "dependencies": {
+    "@babel/runtime": "^7.29.7",
+    "@groundcover/react-native": "workspace:*",
+    "@react-native-async-storage/async-storage": "2.2.0",
+    "@react-navigation/bottom-tabs": "^7.2.0",
+    "@react-navigation/native": "^7.0.14",
+    "@react-navigation/native-stack": "^7.2.0",
+    "axios": "^1.12.2",
+    "expo": "~57.0.0",
+    "expo-constants": "~57.0.7",
+    "expo-status-bar": "~57.0.1",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-safe-area-context": "5.7.0",
+    "react-native-screens": "~4.28.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.17",
+    "typescript": "~6.0.3"
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "name": "groundcover",
+  "private": true,
+  "scripts": {
+    "build": "turbo run build",
+    "prepare": "node scripts/vendor-engine.mjs",
+    "dev": "turbo run dev build:watch --parallel --filter=@groundcover/browser --filter=playground --filter=nextjs",
+    "test": "turbo test",
+    "dev:rn": "turbo run dev --filter=rn-playground",
+    "e2e": "pnpm run build && npx playwright test tests/e2e/playground",
+    "e2e:rn": "mobilewright test",
+    "e2e:rn:ios": "mobilewright test --project rn-ios",
+    "e2e:rn:android": "mobilewright test --project rn-android",
+    "e2e:flutter:ios": "APP=flutter mobilewright test --project flutter-ios",
+    "e2e:flutter:android": "APP=flutter mobilewright test --project flutter-android",
+    "e2e:native:ios": "APP=native mobilewright test --project native-ios",
+    "e2e:native:android": "APP=native mobilewright test --project native-android",
+    "preview": "turbo run preview --filter=playground"
+  },
+  "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
+  "devDependencies": {
+    "@mobilewright/test": "0.0.62",
+    "@playwright/test": "^1.51.1",
+    "@types/node": "^22.13.5",
+    "mobilewright": "0.0.62",
+    "turbo": "^2.4.4",
+    "wait-on": "^7.2.0"
+  },
+  "version": "0.0.1",
+  "pnpm": {
+    "patchedDependencies": {
+      "mobilewright@0.0.62": "patches/mobilewright@0.0.62.patch"
+    }
+  }
+}

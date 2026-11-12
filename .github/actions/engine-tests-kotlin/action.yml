@@ -1,0 +1,30 @@
+name: Engine unit tests (Kotlin)
+description: >-
+  The native engine's JVM unit tests (packages/core/kotlin/jvm-test). One
+  definition for every lane that ships the engine (react-native.yml,
+  flutter.yml, native-android.yml), so each lane's gate holds the same check.
+  The caller checks out the repo first.
+
+inputs:
+  cache-read-only:
+    description: >-
+      Passed to setup-gradle. Each caller states its own policy; see the call
+      sites.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+      with:
+        distribution: temurin
+        java-version: '17'
+    # setup-gradle is kept for its dependency cache; the version actually used is
+    # the one the wrapper pins, not whatever the action would install.
+    - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+      with:
+        cache-read-only: ${{ inputs.cache-read-only }}
+    - name: Engine unit tests (Kotlin)
+      shell: bash
+      working-directory: packages/core/kotlin/jvm-test
+      run: ./gradlew test --no-daemon

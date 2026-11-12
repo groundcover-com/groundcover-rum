@@ -1,0 +1,284 @@
+name: Release the Android SDK
+
+# Uploads com.groundcover:rum-android and its three integration modules (packages/android) to Maven
+# Central, by hand, from main only. Nothing becomes public here: Central holds the upload until
+# someone publishes it.
+#
+# 1. validate: the version is new and is the one packages/android builds and reports
+#    (gradle.properties' VERSION_NAME and SDK_VERSION in DeviceAttributes.kt), the CHANGELOG has an
+#    entry for it, and Native Android CI's checks pass. The four artifacts are built into a local
+#    Maven repository and kept as this run's `maven-upload-set` artifact: exactly what is uploaded,
+#    but for signatures and checksums, so it is also what gets reviewed.
+# 2. upload, in the `maven-central` environment (a reviewer approves): signs that set, adds its
+#    checksums and uploads it to the Central Portal as one deployment, then waits for Central to
+#    validate it, and fails if Central rejects it. It checks out nothing and builds nothing: the
+#    signing key and the portal token reach gpg and curl, never a build script or a plugin.
+#    Central never replaces a deployment: re-running this job uploads a second one beside the
+#    first. So if it fails after uploading (most likely because Central took longer than the
+#    20-minute wait), look in the portal first, where the deployment may still validate. If you
+#    re-run anyway, Drop the extra deployment.
+# 3. tag: android-v<version>, at the commit uploaded. A test upload (the input below) pushes none.
+#    If it fails, re-run the run's failed jobs: the upload isn't repeated, and the tag job accepts
+#    a tag it already pushed.
+#
+# Then, by hand, in the Central Portal (central.sonatype.com, Deployments): install the held
+# deployment in a test app first, then Publish it, or Drop it. A version on Central can never be
+# changed or deleted, which is why nothing here publishes.
+#
+# The `maven-central` environment holds four secrets: MAVEN_CENTRAL_USERNAME and
+# MAVEN_CENTRAL_PASSWORD (a Central Portal user token, not an account's password), SIGNING_KEY (the
+# release key's ASCII-armored private half) and SIGNING_KEY_PASSWORD.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: The version to release, exactly as VERSION_NAME in packages/android/gradle.properties (e.g. 0.0.1-rc.0)
+        required: true
+        type: string
+      test_upload:
+        description: A test upload, to Drop in the portal afterwards. Pushes no tag.
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-android
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate the release
+    # Ubuntu 22.04, for its Android SDK, as Native Android CI.
+    runs-on: blacksmith-16vcpu-ubuntu-2204
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ inputs.version }}
+    steps:
+      - name: Releases come from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::release from main, not $GITHUB_REF: the tag's commit is what gets uploaded"
+          exit 1
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      # Asked of the API with the job's token, which reads this repository's tags whether it is
+      # public or private: the checkout keeps no credentials, and an unauthenticated
+      # `git ls-remote` fails on a private repository, which would read as "no such tag".
+      - name: The version is valid, and its tag is new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::'$VERSION' is not a release version (no -SNAPSHOT)"
+            exit 1
+          fi
+          status=$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/android-v$VERSION")
+          case "$status" in
+            404) ;;
+            200) echo "::error::android-v$VERSION already exists"; exit 1 ;;
+            *) echo "::error::couldn't check whether android-v$VERSION exists (HTTP $status)"; exit 1 ;;
+          esac
+      - name: Gradle's version and the SDK's own say the same
+        run: |
+          set -euo pipefail
+          gradle=$(sed -n 's/^VERSION_NAME=//p' packages/android/gradle.properties)
+          sdk=$(sed -n 's/^internal const val SDK_VERSION = "\(.*\)"$/\1/p' \
+            packages/android/rum-android/src/main/kotlin/com/groundcover/rum/core/platform/DeviceAttributes.kt)
+          echo "gradle.properties=$gradle DeviceAttributes.kt=$sdk requested=$VERSION"
+          if [ "$gradle" != "$VERSION" ] || [ "$sdk" != "$VERSION" ]; then
+            echo "::error::set VERSION_NAME in packages/android/gradle.properties and SDK_VERSION in DeviceAttributes.kt to $VERSION first"
+            exit 1
+          fi
+      # Dated, as RN's are: "Unreleased" would ship in the mirror and on the release.
+      - name: The CHANGELOG has a dated entry for it
+        run: |
+          set -euo pipefail
+          heading=$(grep -E "^## \[${VERSION//./\\.}\]" packages/android/CHANGELOG.md || true)
+          if [ -z "$heading" ]; then
+            echo "::error::packages/android/CHANGELOG.md has no '## [$VERSION]' entry"
+            exit 1
+          fi
+          if ! [[ "$heading" =~ [0-9]{4}-[0-9]{2}-[0-9]{2} ]]; then
+            echo "::error::date the CHANGELOG heading: '$heading'"
+            exit 1
+          fi
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      # No Gradle cache in a release build: what a cache holds was written by other runs, and nothing
+      # from them may reach a signed artifact. Every dependency comes fresh from its repository.
+      - uses: gradle/actions/setup-gradle@ed408507eac070d1f99cc633dbcf757c94c7933a # v4.4.3
+        with:
+          cache-disabled: true
+      - name: ktlint, Android lint, API surface, unit tests
+        working-directory: packages/android
+        run: ./gradlew ktlintCheck lint apiCheck testDebugUnitTest --no-daemon
+      # What the upload will hold, but for signatures and checksums, which the upload job adds.
+      - name: Build the upload set
+        working-directory: packages/android
+        run: |
+          set -euo pipefail
+          ./gradlew publishToMavenLocal -Dmaven.repo.local="$RUNNER_TEMP/maven-upload-set" --no-daemon
+          set_dir="$RUNNER_TEMP/maven-upload-set/com/groundcover"
+          # Maven's local bookkeeping, which Central doesn't take.
+          find "$set_dir" -name 'maven-metadata*.xml' -delete
+          missing=0
+          for artifact in rum-android rum-android-compose rum-android-okhttp rum-android-timber; do
+            for file in "$artifact-$VERSION.aar" "$artifact-$VERSION.pom" "$artifact-$VERSION.module" \
+              "$artifact-$VERSION-sources.jar" "$artifact-$VERSION-javadoc.jar"; do
+              if [ ! -f "$set_dir/$artifact/$VERSION/$file" ]; then
+                echo "::error::the upload set has no $file"
+                missing=1
+              fi
+            done
+          done
+          # Those 20 files and nothing else.
+          count=$(find "$set_dir" -type f | wc -l)
+          if [ "$count" -ne 20 ]; then
+            echo "::error::the upload set has $count files, not 20:"
+            find "$set_dir" -type f | sort
+            missing=1
+          fi
+          exit "$missing"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: maven-upload-set
+          path: ${{ runner.temp }}/maven-upload-set/com/groundcover
+          if-no-files-found: error
+
+  upload:
+    name: Sign and upload to Maven Central
+    needs: validate
+    # validate already fails anywhere else; this keeps the signing key off any other ref even if
+    # that step is ever lost.
+    if: github.ref == 'refs/heads/main'
+    # GitHub's own runner for the one job that holds the signing key, as publish-flutter.yml's.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    # Named so the repo can put a required reviewer on it; it holds the secrets.
+    environment: maven-central
+    steps:
+      # Exactly the set validate built. No checkout: nothing from the repository runs here.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: maven-upload-set
+          path: ${{ runner.temp }}/bundle/com/groundcover
+      # Central wants every file signed, with an MD5 and a SHA-1 beside it; signatures get no
+      # checksums. Each signature is verified before anything leaves the runner.
+      - name: Sign the set and add its checksums
+        env:
+          SIGNING_KEY: ${{ secrets.SIGNING_KEY }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          trap 'rm -rf "$GNUPGHOME"' EXIT
+          printf '%s\n' "$SIGNING_KEY" | gpg --batch --quiet --import
+          cd "$RUNNER_TEMP/bundle"
+          files=()
+          while IFS= read -r file; do files+=("$file"); done < <(find com -type f | sort)
+          if [ "${#files[@]}" -ne 20 ]; then
+            echo "::error::expected the 20 files validate built, found ${#files[@]}"
+            exit 1
+          fi
+          for file in "${files[@]}"; do
+            printf '%s' "$SIGNING_KEY_PASSWORD" | gpg --batch --quiet --yes --pinentry-mode loopback \
+              --passphrase-fd 0 --armor --detach-sign --output "$file.asc" "$file"
+            gpg --batch --quiet --verify "$file.asc" "$file"
+            md5sum "$file" | cut -d' ' -f1 > "$file.md5"
+            sha1sum "$file" | cut -d' ' -f1 > "$file.sha1"
+          done
+      # automatic publishing off (USER_MANAGED), so the deployment waits in the portal for a
+      # Publish or a Drop; the API is the one the Gradle plugin's own upload uses.
+      - name: Upload, and wait for Central to validate it
+        env:
+          CENTRAL_USERNAME: ${{ secrets.MAVEN_CENTRAL_USERNAME }}
+          CENTRAL_PASSWORD: ${{ secrets.MAVEN_CENTRAL_PASSWORD }}
+          VERSION: ${{ inputs.version }}
+          CENTRAL: https://central.sonatype.com
+        run: |
+          set -euo pipefail
+          # Files only, no directory entries, as the Gradle plugin's own bundle.
+          (cd "$RUNNER_TEMP/bundle" && zip -qrD "$RUNNER_TEMP/bundle.zip" com)
+          token=$(printf '%s:%s' "$CENTRAL_USERNAME" "$CENTRAL_PASSWORD" | base64 | tr -d '\n')
+          echo "::add-mask::$token"
+          id=$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $token" \
+            -F "bundle=@$RUNNER_TEMP/bundle.zip" \
+            "$CENTRAL/api/v1/publisher/upload?name=rum-android-$VERSION&publishingType=USER_MANAGED")
+          id=$(printf '%s' "$id" | tr -d '[:space:]')
+          echo "Uploaded as deployment $id; waiting for Central to validate it."
+          state=PENDING
+          for _ in $(seq 120); do
+            status=$(curl -sS --fail-with-body -X POST -H "Authorization: Bearer $token" \
+              "$CENTRAL/api/v1/publisher/status?id=$id")
+            state=$(jq -r .deploymentState <<< "$status")
+            case "$state" in
+              VALIDATED)
+                {
+                  echo "Uploaded com.groundcover:rum-android{,-compose,-okhttp,-timber}:$VERSION as deployment $id."
+                  echo "It waits in the Central Portal (central.sonatype.com, Deployments) until you Publish or Drop it."
+                } >> "$GITHUB_STEP_SUMMARY"
+                exit 0
+                ;;
+              FAILED)
+                echo "::error::Central rejected deployment $id: Drop it in the portal, fix the cause, and start a new run"
+                jq .errors <<< "$status"
+                exit 1
+                ;;
+              PUBLISHING | PUBLISHED)
+                echo "::error::deployment $id is $state, which a held upload never should be"
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          echo "::error::deployment $id is still $state after 20 minutes and may yet validate: look in the portal before re-running, which uploads a second deployment"
+          exit 1
+
+  tag:
+    name: Push the release tag
+    needs: upload
+    if: github.ref == 'refs/heads/main' && !inputs.test_upload
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    # Through the API, at the commit validate checked, not wherever the branch is by now. No
+    # workflow runs on android-v* tags, so the job's own token is enough. A tag already at that
+    # commit is a re-run finishing the job, and passes.
+    steps:
+      - name: Tag android-v${{ inputs.version }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: android-v${{ inputs.version }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          status=$(curl -sS -o "$RUNNER_TEMP/ref.json" -w '%{http_code}' \
+            -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" \
+            "$GITHUB_API_URL/repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG")
+          case "$status" in
+            404)
+              gh api "repos/$GITHUB_REPOSITORY/git/refs" -f ref="refs/tags/$TAG" -f sha="$SHA" > /dev/null
+              echo "Pushed $TAG at $SHA." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            200)
+              existing=$(jq -r .object.sha "$RUNNER_TEMP/ref.json")
+              if [ "$existing" != "$SHA" ]; then
+                echo "::error::$TAG already points at $existing, not $SHA"
+                exit 1
+              fi
+              echo "$TAG was already at $SHA." >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *) echo "::error::couldn't check whether $TAG exists (HTTP $status)"; exit 1 ;;
+          esac

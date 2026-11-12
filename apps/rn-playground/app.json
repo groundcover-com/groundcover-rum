@@ -1,0 +1,20 @@
+{
+  "expo": {
+    "name": "groundcover RUM playground",
+    "slug": "gc-rum-playground",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.groundcover.rumplayground"
+    },
+    "android": {
+      "package": "com.groundcover.rumplayground"
+    },
+    "plugins": [
+      "expo-status-bar"
+    ]
+  }
+}

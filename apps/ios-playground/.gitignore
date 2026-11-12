@@ -1,0 +1,7 @@
+# Generated from project.yml by generate.sh; the package pins live in Package.resolved.
+NativePlayground.xcodeproj/
+build/
+DerivedData/
+
+# A device run's environment, ingest key included (README): never committed.
+device.xcconfig

@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    // Tests run on Node (vitest's `node` environment) and typecheck against
+    // @types/node — NOT the hand-declared host surface in types/, which would
+    // conflict with it. No DOM lib: core's tests model hosts with fakes, and
+    // eslint's restricted-globals rules stay on for them (see eslint.config.mjs).
+    "lib": ["es2022"],
+    "types": ["node"],
+    "composite": false
+  },
+  "include": ["./src/**/*"],
+  "exclude": ["dist", "node_modules"]
+}

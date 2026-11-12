@@ -1,0 +1,430 @@
+name: Web CI
+
+# @groundcover/browser's unit suite plus the web Playwright suite, which builds
+# every workspace package and drives apps/playground in chromium, firefox and
+# webkit.
+#
+# The lane skips diffs that can only affect the mobile SDKs (React Native,
+# Flutter, the native iOS and Android SDKs, and the native engine they share): a
+# mobile-only change cannot reach the browser bundle, so the build plus the whole
+# browser suite would be pure waste on every mobile PR.
+#
+# That skip lives in the `changes` job, NOT in a trigger-level `paths-ignore`,
+# and the difference is load-bearing rather than stylistic. A workflow skipped by
+# a trigger filter creates no check run at all, and GitHub blocks a PR whose
+# required check never reports. `Web CI` below is a required check, so the
+# workflow must always run and always report. See .github/actions/changed-paths
+# for the full reasoning.
+#
+# `push` is unfiltered for a different reason: main always gets a full-suite
+# signal after merge, whatever the merge commit happened to touch.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Least privilege: the default for every job is read-only source access and
+# nothing else. `pull-requests: read` is granted to the `changes` job alone.
+permissions:
+  contents: read
+
+# A force-push cancels the superseded run instead of leaving the whole suite
+# running to completion. Only PR runs are cancelled: a main run is the
+# post-merge signal and must always finish.
+concurrency:
+  group: web-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    # Distinct per lane: the job name IS the check context, so two lanes both
+    # calling this `Changed paths` would render two identical rows in the PR and
+    # collide as one context if anyone ever required it.
+    name: Web changed paths
+    # Scoped here rather than at workflow level. `pull-requests: read` is only
+    # needed to list the PR's files, and every other job in this lane runs
+    # PR-authored code by design — install scripts, the specs themselves — so
+    # handing them PR API authority they never use is authority they can leak.
+    # A job-level `permissions:` REPLACES the workflow default, so `contents:
+    # read` is restated here for the checkout.
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 5
+    outputs:
+      web: ${{ steps.filter.outputs.web }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/actions/changed-paths
+      - id: paths
+        uses: ./.github/actions/changed-paths
+
+      # Deliberately fail-OPEN: the suite runs unless EVERY changed file is
+      # provably irrelevant to the browser. Anything unrecognised still runs it,
+      # so a new web-relevant directory added later cannot silently lose
+      # coverage.
+      #
+      # react-native.yml's filter is the mirror image — a positive list, failing
+      # CLOSED, because there a missed path costs a fleet of macOS runners rather
+      # than coverage. The two lanes want opposite failure directions; do not
+      # "make them consistent".
+      #
+      # packages/core/** is deliberately NOT in this list. core is source-only
+      # and tsup inlines it via `noExternal`, so a core change literally alters
+      # the shipped browser bundle. It MUST run this suite. That is the case the
+      # fail-open design exists for — do not "complete" the list with it. Only
+      # core's native engine (core/swift, core/kotlin) and its Markdown are left
+      # out: tsup never sees them.
+      - name: Decide whether the web lane runs
+        id: filter
+        env:
+          FILES: ${{ steps.paths.outputs.files-path }}
+          IS_PR: ${{ steps.paths.outputs.is-pull-request }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_PR" != 'true' ]; then
+            echo 'not a PR — running the full lane'
+            echo 'web=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # `grep -v` with several -e patterns selects lines matching NONE of
+          # them, so this asks "is any changed file outside the mobile-only set?".
+          if grep -qvE \
+              -e '^packages/react-native/' \
+              -e '^packages/core/swift/' \
+              -e '^packages/core/kotlin/' \
+              -e '^packages/core/.*\.md$' \
+              -e '^scripts/vendor-engine\.mjs$' \
+              -e '^apps/rn-playground/' \
+              -e '^tests/e2e/mobile/' \
+              -e '^mobilewright\.config\.ts$' \
+              -e '^\.github/workflows/react-native\.yml$' \
+              -e '^packages/flutter/' \
+              -e '^apps/flutter-playground/' \
+              -e '^\.github/actions/engine-tests-kotlin/' \
+              -e '^\.github/workflows/flutter\.yml$' \
+              -e '^\.github/workflows/(release|publish)-flutter\.yml$' \
+              -e '^packages/ios/' \
+              -e '^apps/ios-playground/' \
+              -e '^\.swift-format$' \
+              -e '^\.github/workflows/native-ios\.yml$' \
+              -e '^packages/android/' \
+              -e '^apps/android-playground/' \
+              -e '^\.github/workflows/native-android\.yml$' \
+              -e '^changelog_unreleased/' \
+              "$FILES"; then
+            echo 'web-relevant changes found — running the lane'
+            echo 'web=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'mobile-only diff — skipping the web lane'
+            echo 'web=false' >> "$GITHUB_OUTPUT"
+          fi
+
+  unit:
+    name: Browser unit tests
+    needs: changes
+    if: ${{ needs.changes.outputs.web == 'true' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.x'
+      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+      # Restore-only. The Linux store is saved only from main, by Core CI and
+      # react-native.yml's `lint` — see core.yml for why.
+      - name: Restore pnpm store
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+      - run: pnpm install --frozen-lockfile
+
+      # Scoped to the browser package, not a bare `pnpm test`: that is turbo
+      # across ALL packages, which would run @groundcover/react-native's vitest,
+      # eslint and typecheck here as well — duplicating the RN lane's `lint` and
+      # `unit` jobs on every RN PR, and running them for nothing on every
+      # web-only PR. RN has no dependency on browser (its only deps are
+      # error-stack-parser and fflate), so a browser change cannot affect it.
+      # core keeps its own lane.
+      - name: Test (@groundcover/browser)
+        run: pnpm --filter @groundcover/browser test
+
+      # The browser package's `test` script runs a build, which regenerates
+      # packages/browser/src/worker/worker-source.ts from the worker entry.
+      # If a contributor edited src/worker/*.ts without committing the
+      # regenerated file, this step fails CI.
+      - name: Verify worker-source.ts is up to date
+        run: git diff --exit-code packages/browser/src/worker/worker-source.ts
+
+  e2e:
+    name: E2E — Web (shard ${{ matrix.shard }}/3)
+    needs: changes
+    if: ${{ needs.changes.outputs.web == 'true' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 20
+    # Three, and not more. Each shard pays a fixed cost (setup, cached
+    # browsers, build) against its slice of the tests. Past three, wall
+    # clock flattens while runner time keeps climbing, because every extra
+    # shard re-pays the whole fixed cost.
+    #
+    # fail-fast: false so one failing shard does not cancel its siblings — the
+    # `report` job wants every shard's blob, including from a red run.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    # Both consumed by `report`. Every shard resolves identical values — the
+    # version from the same lockfile, the total from the same matrix — so the
+    # matrix's last-writer-wins on job outputs is benign here.
+    #
+    # `strategy.job-total` is the matrix length, which makes the `shard:` list
+    # above the single source of truth for the shard count: the `--shard=N/total`
+    # denominator and the report's completeness check both derive from it. The
+    # `/3` in the display name is a label only — if it drifts it misnames a
+    # check, it cannot cost coverage.
+    outputs:
+      playwright-version: ${{ steps.pw.outputs.version }}
+      shard-total: ${{ strategy.job-total }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '24.x'
+
+      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore pnpm store
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - run: pnpm install --frozen-lockfile
+
+      # Resolved from the installed package rather than package.json's `^1.51.1`
+      # range: the cache key and the `report` job both need the version actually
+      # on disk, not the one a range might resolve to next week.
+      #
+      # Validated as single-line semver, and validated in node rather than the
+      # shell so no quoting is involved. The value comes out of node_modules,
+      # which a PR controls — package.json, pnpm-lock.yaml, and this repo's
+      # pnpm.patchedDependencies can each put an arbitrary string in a package's
+      # `version` — and it is interpolated into another job's command. The
+      # anchored pattern rejects shell metacharacters and, being anchored, also
+      # rejects a multi-line value that would inject extra GITHUB_OUTPUT keys.
+      #
+      # Hygiene, not a privilege boundary: this job already runs PR-authored code
+      # by design (install scripts, and the specs themselves are the point) with
+      # no secrets and a read-only token, so an injection here grants nothing new.
+      # Validated so a malformed version fails loudly at the source instead of
+      # mangling a later job's command.
+      - name: Resolve Playwright version
+        id: pw
+        run: |
+          node -e '
+            const v = require("@playwright/test/package.json").version;
+            if (!/^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$/.test(v)) {
+              console.log("::error::refusing a non-semver Playwright version: " + JSON.stringify(v));
+              process.exit(1);
+            }
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "version=" + v + "\n");
+          '
+
+      # No restore-keys: a browser directory restored from a DIFFERENT Playwright
+      # version is worse than an empty one, because `playwright install` would
+      # consider it satisfied and the suite would launch mismatched binaries.
+      # Exact key or nothing.
+      - name: Restore Playwright browsers
+        id: pw-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+
+      # The browser binaries cache; the apt packages they link against do not and
+      # cannot, so `install-deps` runs either way. What the cache buys is the
+      # binary download.
+      - name: Install Playwright browsers + OS deps (cache miss)
+        if: ${{ steps.pw-cache.outputs.cache-hit != 'true' }}
+        run: npx playwright install --with-deps
+
+      - name: Install Playwright OS deps (cache hit)
+        if: ${{ steps.pw-cache.outputs.cache-hit == 'true' }}
+        run: npx playwright install-deps
+
+      # Main-only and one-shard, same quota reason as the pnpm store — three
+      # browsers make a large entry, and cache writes are branch-scoped.
+      - name: Save Playwright browsers
+        if: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 && steps.pw-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
+
+      # The root `e2e` script (`pnpm run build && playwright test`) as two steps,
+      # so the Actions UI attributes build and test time separately instead of
+      # hiding both inside one step. The script remains the local
+      # one-shot entry point.
+      #
+      # Each shard builds its own rather than downloading a shared artifact: the
+      # build is cheap, so an artifact round-trip plus a second job's
+      # spin-up costs about the same while adding a stale-bundle failure mode.
+      - name: Build packages
+        run: pnpm run build
+
+      # `vite preview` serves apps/playground/dist. If the build silently
+      # produced nothing, preview would serve an empty tree and every failure
+      # would read as a test bug. Fail here, where the cause is unambiguous.
+      - name: Verify the playground bundle exists
+        run: test -s apps/playground/dist/index.html
+
+      # `blob` is what `report` merges; `list` keeps per-test lines in this job's
+      # log. Both on the CLI rather than in playwright.config.ts, so the config
+      # stays the local-dev default.
+      #
+      # Note the config's retries (2) and maxFailures (2) apply PER SHARD, so
+      # the suite tolerates up to six failures before bailing out. Accepted
+      # deliberately as the price of sharding.
+      - name: Run E2E tests (shard ${{ matrix.shard }}/3)
+        run: npx playwright test tests/e2e/playground --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=blob,list
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ !cancelled() }}
+        with:
+          name: blob-report-${{ matrix.shard }}
+          path: blob-report/
+          # Intermediate: consumed by `report` once the shards finish, never read by a
+          # human. The merged report below is the one with a human retention.
+          retention-days: 1
+
+  report:
+    name: E2E report
+    needs: e2e
+    # Runs on a red lane too — a failing suite is exactly when someone wants the
+    # trace. The version guard also covers the skip: when `e2e` never ran there
+    # is no version and nothing to merge.
+    if: ${{ !cancelled() && needs.e2e.outputs.playwright-version != '' }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    # 5, not 10: the real work is short, so a generous timeout only buys a longer
+    # wait before a stall is reported.
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: blob-report-*
+          path: blob-report
+          merge-multiple: true
+
+      # download-artifact will happily hand `merge-reports` two blobs instead of
+      # three. A shard that dies BEFORE its test step — install, build, or the
+      # bundle guard — never writes blob-report/, and upload-artifact only warns
+      # on a missing path. merge-reports would then emit a confident,
+      # complete-looking HTML report covering two thirds of the suite.
+      #
+      # The failing shard's own check is still red, so nothing merges on a false
+      # green; the damage is that the report lies to whoever opens it, which is
+      # the entire reason it exists. A shard that fails at the TEST step does
+      # upload its blob, so a normal red run still merges all three.
+      #
+      # One .zip per shard, flattened here by merge-multiple.
+      - name: Verify every shard reported
+        run: |
+          set -euo pipefail
+          found=$(find blob-report -name '*.zip' | wc -l | tr -d ' ')
+          echo "blob reports found: $found (expected $EXPECTED)"
+          find blob-report -name '*.zip' | sort | sed 's/^/  /'
+          if [ "$found" -ne "$EXPECTED" ]; then
+            echo "::error::expected $EXPECTED shard blob reports, found $found — the merged report would be silently incomplete"
+            exit 1
+          fi
+        env:
+          EXPECTED: ${{ needs.e2e.outputs.shard-total }}
+
+      # Deliberately no checkout and no pnpm install. `merge-reports` needs the
+      # Playwright CLI and nothing else — no workspace, no browsers, no pnpm
+      # store restore for one command.
+      #
+      # Pinned to the exact version the shards ran: blob reports are only
+      # guaranteed mergeable by a matching Playwright.
+      #
+      # The fetch bounds matter because this job's real work is short: unbounded,
+      # npm's retry ladder can stall far longer than the task, and the failure
+      # would read as "the report is broken" rather than "the registry was slow".
+      # A local CLI would need a checkout plus a full install or a pnpm store
+      # restore for one command, which is the waste this job exists to avoid.
+      # Losing the report on a registry outage is cheaper.
+      #
+      # The version arrives through a quoted env var rather than `${{ }}`
+      # interpolation into the command line, so the shell never parses it.
+      - name: Merge shard reports
+        env:
+          PW_VERSION: ${{ needs.e2e.outputs.playwright-version }}
+          npm_config_fetch_retries: '2'
+          npm_config_fetch_retry_maxtimeout: '20000'
+          npm_config_fetch_timeout: '60000'
+        run: npx --yes "@playwright/test@$PW_VERSION" merge-reports --reporter=html ./blob-report
+
+      # The merged HTML report, written by `merge-reports` above. The config's
+      # own `reporter: 'list'` writes no `playwright-report/`, so this is the
+      # only place a CI failure's trace can be read outside the log.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 14
+
+  # The required status check for this lane.
+  #
+  # It reports on EVERY PR, including mobile-only ones where the work above is
+  # skipped — which is why the filter is not on the trigger. It also
+  # gives the lane ONE stable name: the shard jobs carry their count, so pinning
+  # those in a required-checks list breaks the moment the count changes.
+  #
+  # `report` is deliberately NOT a dependency: a broken report deserves a red
+  # check of its own, but it is not a test failure and must not block a merge.
+  gate:
+    name: Web CI
+    needs: [changes, unit, e2e]
+    if: ${{ !cancelled() }}
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 5
+    steps:
+      # `if: !cancelled()` above is what makes this correct. A plain `needs:`
+      # would SKIP this job when a dependency failed, and a skipped job reports
+      # Success — a false green on a red lane. Running unconditionally and
+      # judging the results explicitly is the only safe shape.
+      #
+      # "success or skipped" is right because a job skipped by the filter reports
+      # `skipped`, and so does a job whose dependency failed — but the job that
+      # actually FAILED reports `failure`, so a real break is still caught. It
+      # also catches `changes` itself failing, which the shard checks alone would
+      # not: skipped shards would report Success on a commit where nothing ran.
+      - name: Check lane results
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          set -euo pipefail
+          echo "$RESULTS" | jq .
+          echo "$RESULTS" | jq -e 'to_entries
+            | all(.value.result == "success" or .value.result == "skipped")' > /dev/null

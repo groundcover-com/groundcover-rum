@@ -1,0 +1,91 @@
+{
+  "name": "@groundcover/react-native",
+  "version": "0.0.1-rc.5",
+  "description": "groundcover Real User Monitoring (RUM) SDK for React Native — sessions, network + distributed tracing, screen navigation, tap, typing and gesture interactions, logs, custom events and JS errors. On a dev build it also captures native crashes, ANR/app-hangs, app start + TTI and frame vitals.",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "react-native": "./dist/index.mjs",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "react-native": "dist/index.mjs",
+  "homepage": "https://docs.groundcover.com/investigate/real-user-monitoring-rum",
+  "files": [
+    "dist",
+    "assets",
+    "android/build.gradle",
+    "android/consumer-rules.pro",
+    "android/src/main",
+    "ios/Engine",
+    "ios/Bridge",
+    "ios/PrivacyInfo.xcprivacy",
+    "GroundcoverRum.podspec",
+    "react-native.config.js",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc --noEmit && tsup",
+    "build:watch": "tsc --noEmit && tsup --watch",
+    "prepack": "node ../../scripts/vendor-engine.mjs",
+    "lint": "eslint .",
+    "typecheck:tests": "tsc -p tsconfig.tests.json",
+    "test": "vitest run && npm run typecheck:tests && npm run lint"
+  },
+  "keywords": [
+    "rum",
+    "sdk",
+    "real-user-monitoring",
+    "observability",
+    "monitoring",
+    "react-native",
+    "expo",
+    "mobile",
+    "tracing",
+    "groundcover"
+  ],
+  "author": "groundcover",
+  "license": "MIT",
+  "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.74.0",
+    "@react-native-async-storage/async-storage": ">=1.19.0",
+    "@react-navigation/native": ">=6.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@react-native-async-storage/async-storage": {
+      "optional": true
+    },
+    "@react-navigation/native": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "error-stack-parser": "2.1.4",
+    "fflate": "0.8.2"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.19.0",
+    "@groundcover/rum-core": "workspace:*",
+    "@types/node": "^22.13.5",
+    "@types/react": "^18.3.0",
+    "eslint": "^9.19.0",
+    "globals": "^15.14.0",
+    "react": "^18.3.1",
+    "react-native": "^0.76.0",
+    "terser": "^5.39.0",
+    "tslib": "^2.8.1",
+    "tsup": "^8.4.0",
+    "typescript": "~5.7.2",
+    "typescript-eslint": "^8.22.0",
+    "vitest": "^3.0.8"
+  }
+}

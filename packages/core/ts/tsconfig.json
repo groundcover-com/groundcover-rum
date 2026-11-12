@@ -1,0 +1,40 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "module": "esnext",
+    // THE PLATFORM GATE: plain ES2022 and NO @types packages. The host
+    // globals core may use are declared by hand in types/host-globals.d.ts —
+    // anything else (window/document/HTMLElement, but also fetch/URL/crypto/
+    // Headers/AbortController/TextEncoder, which @types/node would bring in)
+    // fails compilation instead of crashing on a host that lacks it. Fix
+    // violations by injecting the touchpoint from the platform package, never
+    // by widening lib/types. eslint.config.mjs's no-restricted-globals is the
+    // second half of this gate (it also covers member access via globalThis).
+    "lib": ["es2022"],
+    "types": [],
+    "skipLibCheck": true,
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "moduleResolution": "node",
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "outDir": "dist",
+    "paths": {
+      "@/*": ["./src/*"]
+    }
+  },
+  "include": ["./src/**/*", "./types/**/*"],
+  // Tests typecheck via tsconfig.tests.json (see there for their host surface).
+  "exclude": ["src/**/*.test.ts", "dist", "node_modules"]
+}

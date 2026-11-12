@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false
+  },
+  // Re-include the test files and stubs that tsconfig.json excludes from the
+  // shipping build, so `tsc -p tsconfig.tests.json` type-checks them too — the
+  // test-utils stubs (react-native-stub / async-storage-stub) are exactly the
+  // code where a type gate earns its keep. Mirrors packages/core/ts/tsconfig.tests.json.
+  "include": ["./src/**/*"],
+  "exclude": ["dist", "node_modules"]
+}

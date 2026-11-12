@@ -1,0 +1,102 @@
+name: Core CI
+
+# @groundcover/rum-core's own suite: vitest, the tests-only typecheck, eslint,
+# and the lint:gate fixture check.
+#
+# core is a SOURCE-ONLY package — its `main`/`exports` point at ./src/*.ts and
+# its `build` is `tsc --noEmit`, emitting nothing. Both consumers alias it to
+# ../core/ts/src (tsconfig paths + vitest alias) and inline it via tsup
+# `noExternal`, so there is no artifact boundary: a core change is a source
+# change inside the browser bundle and inside the RN bundle. That is why
+# packages/core runs both the web and RN lanes (web skips only core/swift,
+# core/kotlin and core's Markdown, which tsup never sees), and why this lane
+# covers only core's own tests rather than pretending to be an integration gate.
+#
+# Deliberately NOT path-filtered, and deliberately without a `changes` job or a
+# gate job, unlike the other lanes. Two reasons:
+#
+#  1. It would not pay. The whole lane is short, so a `changes` job to skip it
+#     would cost about as much as it saves.
+#  2. It is the repo's one unconditionally-reporting required check. Every other
+#     lane's gate depends on a `changes` job computing the right answer; this one
+#     depends on nothing, so if that logic ever breaks there is still a gate
+#     standing. Cheap insurance.
+#
+# Because it always runs, the job name IS the required status check and there is
+# nothing to skip — no gate indirection needed.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: core-ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  core:
+    name: Core CI
+    runs-on: blacksmith-16vcpu-ubuntu-2404
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # 24.x, an LTS line, and the one node major every lane uses.
+          node-version: '24.x'
+
+      # No `version:` input — pnpm/action-setup reads the root package.json's
+      # `packageManager` field, so the pnpm version lives in exactly one place.
+      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+
+      - name: pnpm store path
+        id: pnpm-store
+        run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
+
+      # Keyed on the ROOT lockfile only, in the one key form every workflow in
+      # this repo shares: pnpm-workspace.yaml makes it the only authoritative
+      # lockfile, so a '**/pnpm-lock.yaml' glob could only add noise.
+      - name: Restore pnpm store
+        id: pnpm-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-
+
+      - run: pnpm install --frozen-lockfile
+
+      # Save only from main. Two jobs write the Linux pnpm store, under the same
+      # key: this one and react-native.yml's `lint`. Whichever save lands first
+      # wins and the other is rejected as a duplicate. Every other Linux job is
+      # restore-only.
+      #
+      # GitHub scopes cache WRITES per branch while reads fall back to the
+      # default branch, so an unconditional save has every PR branch restore
+      # main's store and then write its own duplicate, until the repo passes
+      # GitHub's 10GB cache ceiling and evicts continuously — and what gets
+      # evicted is the RN lane's expensive apk/pod/AVD entries.
+      #
+      # This lane writes because it is unfiltered: it runs on every push to main,
+      # so the store is always seeded, whereas a filtered lane would only seed it
+      # on the runs that happened to match.
+      - name: Save pnpm store
+        if: ${{ github.ref == 'refs/heads/main' && steps.pnpm-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # vitest + tsconfig.tests.json typecheck + eslint + lint:gate, per the
+      # package's own `test` script. Nothing else in the repo runs core's vitest:
+      # the consumer lanes only get core's `tsc --noEmit` for free via turbo's
+      # `test dependsOn ^build`.
+      - name: Test (@groundcover/rum-core)
+        run: pnpm --filter @groundcover/rum-core test
