@@ -65,7 +65,7 @@ jobs:
     outputs:
       ios: ${{ steps.filter.outputs.ios }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: .github/actions/changed-paths
@@ -117,7 +117,7 @@ jobs:
     runs-on: blacksmith-12vcpu-macos-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Select Xcode
@@ -165,7 +165,7 @@ jobs:
       - name: Engine unit tests (Swift)
         working-directory: packages/core/swift
         run: ./run-engine-tests.sh
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       # Writes the engine copy (Node's standard library only, so no install), builds the package
@@ -206,14 +206,14 @@ jobs:
     runs-on: blacksmith-12vcpu-macos-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Select Xcode
         uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: latest-stable
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
       # The package compiles a git-ignored copy of the engine (Node's standard library only).
@@ -241,7 +241,7 @@ jobs:
             -destination "platform=iOS Simulator,id=$DEVICE" -derivedDataPath build \
             -disableAutomaticPackageResolution -collect-test-diagnostics never 2>&1 \
             | grep -E 'Executed [0-9]+ tests?, with|Test run with|Test Case .* failed|recorded an issue|error:|Testing failed:|Test crashed|Restarting after unexpected exit|encountered an error|Failure collecting diagnostics|\*\* TEST (SUCCEEDED|FAILED) \*\*'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-playground-ios
           path: apps/ios-playground/build/Build/Products/Debug-iphonesimulator/NativePlayground.app
@@ -262,7 +262,7 @@ jobs:
     env:
       APP: native
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Select Xcode
@@ -282,10 +282,10 @@ jobs:
             com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro "$IOS_SIM_RUNTIME")
           echo "SIM_UDID=$DEVICE" >> "$GITHUB_ENV"
           xcrun simctl boot "$DEVICE" || true
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 9.15.0
       - name: pnpm store path
@@ -293,7 +293,7 @@ jobs:
         run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
       # Restore-only: react-native.yml saves this store from main.
       - name: Restore pnpm store
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.dir }}
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -301,7 +301,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Wait for the simulator to finish booting
         run: xcrun simctl bootstatus "$SIM_UDID"
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: native-playground-ios
           path: apps/ios-playground/artifacts/NativePlayground.app
@@ -321,7 +321,7 @@ jobs:
         run: npx mobilewright test --project=native-ios tests/e2e/mobile/00-bootstrap/00-warmup.spec.ts
       - name: Run Mobilewright e2e (iOS shard ${{ matrix.shard }}/3)
         run: npx mobilewright test --project=native-ios --shard=${{ matrix.shard }}/3
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: native-e2e-report-ios-shard-${{ matrix.shard }}

@@ -111,7 +111,7 @@ jobs:
     outputs:
       rn: ${{ steps.filter.outputs.rn }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           sparse-checkout: .github/actions/changed-paths
@@ -185,16 +185,16 @@ jobs:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           # 24.x, an LTS line, matching the web lane. The publisher runs 22.x;
           # packages/react-native/dist is expected to build identically under
           # both majors, so what ships is what CI tested.
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 9.15.0
       - name: pnpm store path
@@ -205,7 +205,7 @@ jobs:
       # pnpm caches in this file point back to.
       - name: Restore pnpm store
         id: pnpm-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.dir }}
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -233,7 +233,7 @@ jobs:
       # duplicate.
       - name: Save pnpm store
         if: ${{ github.ref == 'refs/heads/main' && steps.pnpm-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.dir }}
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -283,13 +283,13 @@ jobs:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 9.15.0
       - name: pnpm store path
@@ -299,7 +299,7 @@ jobs:
       # jobs own the writes.
       - name: Restore pnpm store
         id: pnpm-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.dir }}
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -336,7 +336,7 @@ jobs:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Shared with flutter.yml, which ships the same engine.
@@ -373,7 +373,7 @@ jobs:
       # producer and consumer cannot disagree about which binary is current.
       key: ${{ steps.appkey.outputs.key }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # The prebuilt-app cache key, computed ONCE here and exported as a job output
@@ -454,12 +454,12 @@ jobs:
       # too — otherwise a native change would e2e-test a stale binary.
       - name: Restore prebuilt iOS app
         id: iosapp
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/rn-playground/artifacts/ios
           key: ${{ steps.appkey.outputs.key }}
       # ---- everything below runs ONLY on a cache miss ----
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.iosapp.outputs.cache-hit != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -495,7 +495,7 @@ jobs:
           printf 'IPHONEOS_DEPLOYMENT_TARGET = 15.1\n' > "$RUNNER_TEMP/engine-lint.xcconfig"
           XCODE_XCCONFIG_FILE="$RUNNER_TEMP/engine-lint.xcconfig" \
             pod lib lint GroundcoverRum.podspec --subspec=Engine --allow-warnings --platforms=ios
-      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         if: steps.iosapp.outputs.cache-hit != 'true'
         with:
           version: 9.15.0
@@ -508,7 +508,7 @@ jobs:
       - name: Restore pnpm store
         id: pnpm-cache
         if: steps.iosapp.outputs.cache-hit != 'true'
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.dir }}
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -534,7 +534,7 @@ jobs:
       # older run's artifacts can't be used for a newer RN.
       - name: Cache CocoaPods + RN prebuilt artifacts
         if: steps.iosapp.outputs.cache-hit != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cocoapods
@@ -581,7 +581,7 @@ jobs:
       # in this job, and a failed build has nothing worth caching.
       - name: Save prebuilt iOS app
         if: steps.iosapp.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/rn-playground/artifacts/ios
           key: ${{ steps.appkey.outputs.key }}
@@ -628,7 +628,7 @@ jobs:
       EXPO_PUBLIC_GC_DSN: http://localhost:9393
       EXPO_PUBLIC_GC_API_KEY: e2e-key
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # Pinned to the image's newest stable Xcode rather than its default (26.5),
@@ -684,10 +684,10 @@ jobs:
           xcrun simctl boot "$DEVICE" || true
       # The Swift engine tests do NOT run here — the `ios-app` job runs them once
       # for the whole lane. Same for the app build.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 9.15.0
       - name: pnpm store path
@@ -696,7 +696,7 @@ jobs:
       # Restore-only here; this job owns the macOS save below.
       - name: Restore pnpm store
         id: pnpm-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.dir }}
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -705,7 +705,7 @@ jobs:
       # Owns the macOS pnpm store write. See the `lint` job for the reasoning.
       - name: Save pnpm store
         if: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 && steps.pnpm-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.dir }}
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -763,7 +763,7 @@ jobs:
       # job's output rather than a local hashFiles so the two cannot drift.
       - name: Restore prebuilt iOS app
         id: iosapp
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/rn-playground/artifacts/ios
           key: ${{ needs.ios-app.outputs.key }}
@@ -814,7 +814,7 @@ jobs:
       - name: Metro log (on failure)
         if: ${{ failure() }}
         run: cat apps/rn-playground/metro.log || true
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ !cancelled() }}
         with:
           name: mobilewright-report-ios-shard-${{ matrix.shard }}
@@ -842,7 +842,7 @@ jobs:
     outputs:
       key: ${{ steps.appkey.outputs.key }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # The prebuilt-apk cache key, computed ONCE here and exported as a job output
@@ -873,16 +873,16 @@ jobs:
         run: echo "key=${{ runner.os }}-appbin-v2-node${{ env.NODE_VERSION }}-${{ hashFiles('packages/react-native/android/src/main/**', 'packages/core/kotlin/src/main/**', 'scripts/vendor-engine.mjs', 'packages/react-native/android/build.gradle', 'packages/react-native/react-native.config.js', 'packages/react-native/package.json', 'apps/rn-playground/package.json', 'apps/rn-playground/app.json', 'pnpm-lock.yaml') }}" >> "$GITHUB_OUTPUT"
       - name: Restore prebuilt Android app
         id: androidapp
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/rn-playground/artifacts/android
           key: ${{ steps.appkey.outputs.key }}
       # ---- everything below runs ONLY on a cache miss ----
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: steps.androidapp.outputs.cache-hit != 'true'
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         if: steps.androidapp.outputs.cache-hit != 'true'
         with:
           version: 9.15.0
@@ -895,12 +895,12 @@ jobs:
       - name: Restore pnpm store
         id: pnpm-cache
         if: steps.androidapp.outputs.cache-hit != 'true'
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.dir }}
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
           restore-keys: ${{ runner.os }}-pnpm-
-      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+      - uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
         if: steps.androidapp.outputs.cache-hit != 'true'
         with:
           distribution: temurin
@@ -927,7 +927,7 @@ jobs:
       # the failure described on the cache key above.
       - name: Cache Gradle
         if: steps.androidapp.outputs.cache-hit != 'true'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.gradle/caches/modules-2
@@ -963,7 +963,7 @@ jobs:
       # caching, and nothing runs after this step that would want the binary kept.
       - name: Save prebuilt Android app
         if: steps.androidapp.outputs.cache-hit != 'true'
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/rn-playground/artifacts/android
           key: ${{ steps.appkey.outputs.key }}
@@ -994,13 +994,13 @@ jobs:
       EXPO_PUBLIC_GC_DSN: http://10.0.2.2:9393
       EXPO_PUBLIC_GC_API_KEY: e2e-key
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-      - uses: pnpm/action-setup@a3252b78c470c02df07e9d59298aecedc3ccdd6d # v3.0.0
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
           version: 9.15.0
       - name: pnpm store path
@@ -1010,7 +1010,7 @@ jobs:
       # jobs own the writes.
       - name: Restore pnpm store
         id: pnpm-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.dir }}
           key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
@@ -1031,7 +1031,7 @@ jobs:
       # local hashFiles, so restore and save cannot disagree.
       - name: Restore prebuilt Android app
         id: androidapp
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: apps/rn-playground/artifacts/android
           key: ${{ needs.android-app.outputs.key }}
@@ -1065,7 +1065,7 @@ jobs:
       # that start an emulator pin env.ANDROID_EMULATOR_BUILD, and the key names it.
       - name: Restore AVD snapshot
         id: avd-cache
-        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.android/avd/*
@@ -1096,7 +1096,7 @@ jobs:
       # manual key bump.
       - name: Save AVD snapshot
         if: steps.avd-create.outcome == 'success' && steps.avd-cache.outputs.cache-hit != 'true' && matrix.shard == 1
-        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.android/avd/*
@@ -1159,7 +1159,7 @@ jobs:
       - name: Metro log (on failure)
         if: ${{ failure() }}
         run: cat apps/rn-playground/metro.log || true
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         # !cancelled(), not always(): a cancelled run's partial results are the
         # one case nobody wants the bytes for. Matches the iOS shard above.
         if: ${{ !cancelled() }}
