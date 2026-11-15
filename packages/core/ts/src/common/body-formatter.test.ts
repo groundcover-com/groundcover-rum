@@ -1,7 +1,7 @@
 /* eslint-disable no-restricted-globals -- exercises the optional host body
    types formatBody probes (FormData, Blob, File, ReadableStream, URLSearchParams),
    which the Node test runtime provides. */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { formatBody } from './body-formatter';
 import * as errorHandler from './error-handler';
 
@@ -10,6 +10,10 @@ describe('formatBody', () => {
 
   beforeEach(() => {
     handleErrorSpy = vi.spyOn(errorHandler, 'handleError');
+  });
+
+  afterEach(() => {
+    handleErrorSpy.mockRestore();
   });
 
 
@@ -216,6 +220,10 @@ describe('formatBody - crash prevention edge cases', () => {
 
   beforeEach(() => {
     handleErrorSpy = vi.spyOn(errorHandler, 'handleError');
+  });
+
+  afterEach(() => {
+    handleErrorSpy.mockRestore();
   });
 
   describe('deeply nested structures', () => {

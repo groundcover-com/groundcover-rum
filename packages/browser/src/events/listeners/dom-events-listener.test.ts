@@ -177,12 +177,29 @@ describe("dom-events-listener", () => {
       expect(selector).toContain('[data-testid="custom-test-id"]');
     });
 
+    // happy-dom 21's selector engine throws on some escapes that are valid CSS and
+    // that browsers match: a backslash-escaped quote inside a quoted attribute
+    // value, and a hex escape such as `\32 ` (CSS.escape's form of a leading
+    // digit). generateSelector drops a part whose lookup throws, so these tests
+    // stand in for the browser's uniqueness lookup, which in their fixtures
+    // matches only the target, and stay about the escaping itself.
+    const selectorAsInBrowser = (target: Element) => {
+      const lookup = vi
+        .spyOn(document.body, "querySelectorAll")
+        .mockReturnValue([target] as unknown as NodeListOf<Element>);
+      try {
+        return listener.generateSelector(target);
+      } finally {
+        lookup.mockRestore();
+      }
+    };
+
     it("should handle special characters in attribute values", () => {
       const div = document.createElement("div");
       div.setAttribute("title", 'Test "with" quotes');
       container.appendChild(div);
 
-      const selector = listener.generateSelector(div);
+      const selector = selectorAsInBrowser(div);
 
       // The quotes should be escaped in the selector
       expect(selector).toContain('[title="Test \\"with\\" quotes"]');
@@ -196,7 +213,7 @@ describe("dom-events-listener", () => {
     // doesn't implement every CSS escape, so it can't confirm the match itself.
     describe("escapes what CSS would otherwise read as syntax", () => {
       const ownPart = (target: Element) =>
-        listener.generateSelector(target).split(" > ").pop();
+        selectorAsInBrowser(target).split(" > ").pop();
 
       it("backslashes in attribute values", () => {
         const other = document.createElement("button");

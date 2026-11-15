@@ -1,0 +1,2 @@
+### Changed
+- **Browser and React Native — fflate 0.8.3.** The SDKs now depend on fflate 0.8.3, which fixes an infinite loop in fflate's ZIP64 parser (GHSA-px8p-9vwx-vf98), and the browser's session-replay compression worker is rebuilt with it. The SDKs only gzip with fflate and never parse ZIP archives, so they were not exposed; the update clears the advisory for scanners that flag the dependency.

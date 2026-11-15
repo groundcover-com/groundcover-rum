@@ -13,6 +13,10 @@ describe("SDKConfig", () => {
       warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     });
 
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
     it("uses the 4-hour default when no value is provided", () => {
       const config = new SDKConfig({ apiKey: "k", cluster: "c", environment: "e", dsn: "d", appId: "a" });
       expect(config.options.sessionMaxDuration).toBe(DEFAULT_SESSION_MAX_DURATION_MS);

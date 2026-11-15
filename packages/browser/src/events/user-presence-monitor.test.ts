@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 import { UserPresenceMonitor } from "./user-presence-monitor";
 
 vi.mock("@groundcover/rum-core/common/logger", () => ({
@@ -15,8 +15,8 @@ const IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 const THROTTLE_MS = 30_000;
 
 describe("UserPresenceMonitor", () => {
-  let onPresence: ReturnType<typeof vi.fn>;
-  let onIdle: ReturnType<typeof vi.fn>;
+  let onPresence: Mock<(nowMs: number) => void>;
+  let onIdle: Mock<() => void>;
   let monitor: UserPresenceMonitor;
 
   beforeEach(() => {

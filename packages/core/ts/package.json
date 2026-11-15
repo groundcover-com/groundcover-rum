@@ -20,15 +20,15 @@
   },
   "dependencies": {
     "error-stack-parser": "2.1.4",
-    "fflate": "0.8.2"
+    "fflate": "0.8.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.19.0",
     "@types/node": "^22.13.5",
-    "eslint": "^9.19.0",
+    "eslint": "^9.39.5",
     "globals": "^15.14.0",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.22.0",
-    "vitest": "^3.0.8"
+    "vitest": "^4.1.12"
   }
 }

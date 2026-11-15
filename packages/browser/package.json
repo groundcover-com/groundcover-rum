@@ -58,23 +58,24 @@
   "devDependencies": {
     "@eslint/js": "^9.19.0",
     "@groundcover/rum-core": "workspace:*",
-    "@size-limit/preset-big-lib": "^11.2.0",
+    "@size-limit/file": "^14.3.0",
+    "@size-limit/webpack": "^14.3.0",
     "@types/node": "^22.13.5",
-    "eslint": "^9.19.0",
+    "eslint": "^9.39.5",
     "globals": "^15.14.0",
-    "happy-dom": "^17.4.1",
-    "postcss": "^8.5.3",
-    "size-limit": "^11.2.0",
+    "happy-dom": "^21.0.4",
+    "postcss": "^8.5.32",
+    "size-limit": "^14.3.0",
     "terser": "^5.39.0",
     "tslib": "^2.8.1",
     "tsup": "^8.4.0",
     "typescript": "~5.7.2",
     "typescript-eslint": "^8.22.0",
-    "vitest": "^3.0.8"
+    "vitest": "^4.1.12"
   },
   "dependencies": {
     "error-stack-parser": "2.1.4",
-    "fflate": "0.8.2",
+    "fflate": "0.8.3",
     "@rrweb/packer": "2.1.0",
     "rrweb": "2.1.0",
     "web-vitals": "4.2.4"

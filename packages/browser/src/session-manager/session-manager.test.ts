@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 import { SessionManager } from "./session-manager";
 import { SAMPLING_STORAGE_KEY } from "@groundcover/rum-core/config/constants";
 import { WorkerClient } from "../worker/worker-client";
@@ -53,14 +53,14 @@ const {
   };
   // Mirror the real cap rule off the instance's (test-reassignable) getters.
   session.isSessionExpired = (nowMs: number = Date.now()) => {
-    const startNs = (session.getSessionStartTime as ReturnType<typeof vi.fn>)();
+    const startNs = (session.getSessionStartTime as Mock<() => number>)();
     if (!startNs) return false;
-    return nowMs - startNs / 1_000_000 >= (session.getSessionMaxDuration as ReturnType<typeof vi.fn>)();
+    return nowMs - startNs / 1_000_000 >= (session.getSessionMaxDuration as Mock<() => number>)();
   };
   // Mirror the real inactivity-gap rule the same way.
   session.isSessionInactive = (nowMs: number = Date.now()) => {
-    const lastActivityMs = (session.getLastActivityMs as ReturnType<typeof vi.fn>)();
-    const startNs = (session.getSessionStartTime as ReturnType<typeof vi.fn>)();
+    const lastActivityMs = (session.getLastActivityMs as Mock<() => number>)();
+    const startNs = (session.getSessionStartTime as Mock<() => number>)();
     // Before the first stamp, measure the gap from birth (matches session-state).
     const baseline = lastActivityMs > 0 ? lastActivityMs : startNs / 1_000_000;
     return baseline > 0 && nowMs - baseline >= 30 * 60 * 1000;
@@ -98,37 +98,39 @@ const {
 // Mock all dependencies: every `new X(...)` inside SessionManager returns the
 // shared fake for that class.
 vi.mock("@groundcover/rum-core/config/config-manager", () => ({
-  ConfigManager: vi.fn(() => configManagerInstance),
+  ConfigManager: vi.fn(function () { return configManagerInstance; }),
 }));
 
 vi.mock("@groundcover/rum-core/session/session-state", () => ({
-  SessionState: vi.fn(() => sessionStateInstance),
+  SessionState: vi.fn(function () { return sessionStateInstance; }),
 }));
 
 vi.mock("@groundcover/rum-core/events/events-pool", () => ({
-  EventsPool: vi.fn(() => eventsPoolInstance),
+  EventsPool: vi.fn(function () { return eventsPoolInstance; }),
 }));
 
 vi.mock("@groundcover/rum-core/events/event-enricher", () => ({
-  EventEnricher: vi.fn(() => ({})),
+  EventEnricher: vi.fn(function () { return {}; }),
 }));
 
 vi.mock("@groundcover/rum-core/transporter/transporter", () => ({
-  Transporter: vi.fn(() => ({})),
+  Transporter: vi.fn(function () { return {}; }),
   encodeInline: vi.fn(),
 }));
 
 vi.mock("../events/instrumentation-manager", () => ({
-  InstrumentationManager: vi.fn().mockImplementation(() => ({
-    instrument: mockInstrument,
-    uninstrument: mockUninstrument,
-    sendCustomEvent: mockSendCustomEvent,
-    isReplayRecording: mockIsReplayRecording,
-    startReplayRecording: mockStartReplayRecording,
-    stopReplayRecording: mockStopReplayRecording,
-    flushPendingReplay: mockFlushPendingReplay,
-    restartReplayForConfigChange: mockRestartReplayForConfigChange,
-  })),
+  InstrumentationManager: vi.fn().mockImplementation(function () {
+    return {
+      instrument: mockInstrument,
+      uninstrument: mockUninstrument,
+      sendCustomEvent: mockSendCustomEvent,
+      isReplayRecording: mockIsReplayRecording,
+      startReplayRecording: mockStartReplayRecording,
+      stopReplayRecording: mockStopReplayRecording,
+      flushPendingReplay: mockFlushPendingReplay,
+      restartReplayForConfigChange: mockRestartReplayForConfigChange,
+    };
+  }),
 }));
 
 vi.mock("../worker/worker-client", () => ({
