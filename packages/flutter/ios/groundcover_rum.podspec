@@ -3,7 +3,7 @@
 Pod::Spec.new do |s|
   s.name             = 'groundcover_rum'
   # The pubspec's version; the package's tests keep the two equal.
-  s.version          = '0.0.1-rc.1'
+  s.version          = '0.0.1-rc.2'
   s.summary          = 'groundcover Real User Monitoring (RUM) SDK for Flutter.'
   s.homepage         = 'https://docs.groundcover.com/investigate/real-user-monitoring-rum'
   s.license          = { :file => '../LICENSE' }

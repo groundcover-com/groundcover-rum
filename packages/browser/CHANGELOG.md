@@ -4,6 +4,10 @@ All notable changes to `@groundcover/browser` are documented here. This project 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [2.2.1] — 2026-11-15
+
+No changes to the SDK's behaviour from `2.2.0`: source comments and documentation only.
+
 ## [2.2.0] — 2026-11-10
 
 Stable release of `2.2.0-rc.0`, with no changes since. Issues for thrown or rejected values that

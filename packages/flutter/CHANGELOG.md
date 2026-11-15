@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.1-rc.2
+
+The third release candidate. No breaking changes from `0.0.1-rc.1`, and no changes to the SDK's
+behaviour: source comments and documentation only.
+
 ## 0.0.1-rc.1
 
 The second release candidate. No breaking changes from `0.0.1-rc.0`.

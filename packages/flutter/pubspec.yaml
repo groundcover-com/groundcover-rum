@@ -3,7 +3,7 @@ description: >-
   groundcover Real User Monitoring (RUM) for Flutter on iOS and Android:
   sessions, network and tracing, screens, taps, errors, logs, native crashes,
   hangs, app start, frame vitals.
-version: 0.0.1-rc.1
+version: 0.0.1-rc.2
 homepage: https://docs.groundcover.com/investigate/real-user-monitoring-rum
 topics:
   - monitoring

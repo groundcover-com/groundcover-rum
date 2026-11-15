@@ -58,12 +58,12 @@ for the product guide; this README is the iOS SDK's documentation.
 ## Install
 
 The SDK is a Swift package. In Xcode, choose **File → Add Package Dependencies…**, enter
-`https://github.com/groundcover-com/groundcover-rum-ios`, pick version `0.0.1-rc.0`, and add the
+`https://github.com/groundcover-com/groundcover-rum-ios`, pick version `0.0.1-rc.1`, and add the
 `GroundcoverRum` product to your app target. In a `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/groundcover-com/groundcover-rum-ios", from: "0.0.1-rc.0"),
+    .package(url: "https://github.com/groundcover-com/groundcover-rum-ios", from: "0.0.1-rc.1"),
 ],
 targets: [
     .target(
