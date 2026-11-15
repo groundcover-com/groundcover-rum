@@ -6,9 +6,9 @@ name: Web CI
 #
 # The lane skips diffs that cannot change the browser bundle: those that only
 # affect the mobile SDKs (React Native, Flutter, the native iOS and Android SDKs,
-# and the native engine they share), and the publish and release workflows, which
-# ship a package but never build what this suite tests. For those, the build plus
-# the whole browser suite would be pure waste.
+# and the native engine they share), the other workflows and the repository's
+# GitHub configuration, which never build what this suite tests, and Markdown.
+# For those, the build plus the whole browser suite would be pure waste.
 #
 # That skip lives in the `changes` job, NOT in a trigger-level `paths-ignore`,
 # and the difference is load-bearing rather than stylistic. A workflow skipped by
@@ -78,8 +78,11 @@ jobs:
       # and tsup inlines it via `noExternal`, so a core change literally alters
       # the shipped browser bundle. It MUST run this suite. That is the case the
       # fail-open design exists for — do not "complete" the list with it. Only
-      # core's native engine (core/swift, core/kotlin) and its Markdown are left
-      # out: tsup never sees them.
+      # core's native engine (core/swift, core/kotlin) is left out, and its
+      # Markdown, as all Markdown is: tsup never sees them.
+      #
+      # The list names categories rather than single files wherever a category is
+      # provably irrelevant, so it doesn't grow with every new workflow or doc.
       - name: Decide whether the web lane runs
         id: filter
         env:
@@ -92,38 +95,50 @@ jobs:
             echo 'web=true' >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # This workflow is the one file under .github/workflows/ the lane runs,
+          # so a change to it runs the lane before the rule below, which skips
+          # every workflow, sees it.
+          if grep -qxF '.github/workflows/web.yml' "$FILES"; then
+            echo 'web.yml changed — running the lane'
+            echo 'web=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           # `grep -v` with several -e patterns selects lines matching NONE of
-          # them, so this asks "is any changed file outside the set below?": the
-          # mobile-only paths, and the publish and release workflows. Those only
-          # run by hand and build their own package, so none of them changes the
-          # bundle this suite tests, publish-browser.yml included.
+          # them, so this asks "is any changed file outside the set below?":
+          #
+          # - Every other workflow. None of them builds what this suite tests:
+          #   the CI lanes test their own SDKs, and the publish and release
+          #   workflows run by hand and build their own package,
+          #   publish-browser.yml included.
+          # - The repository's GitHub configuration: CODEOWNERS, Dependabot,
+          #   actionlint. Not .github/actions/: this lane runs changed-paths, so
+          #   an action stays relevant unless it's named below, as the Kotlin
+          #   engine's test steps are.
+          # - Markdown, anywhere, and the LICENSE. The browser package ships its
+          #   README and CHANGELOG, but nothing this suite builds or runs reads
+          #   them.
+          # - The mobile-only paths.
           if grep -qvE \
+              -e '^\.github/workflows/' \
+              -e '^\.github/(CODEOWNERS|dependabot\.yml|actionlint\.yaml)$' \
+              -e '\.md$' \
+              -e '^LICENSE$' \
+              -e '^changelog_unreleased/' \
               -e '^packages/react-native/' \
               -e '^packages/core/swift/' \
               -e '^packages/core/kotlin/' \
-              -e '^packages/core/.*\.md$' \
               -e '^scripts/vendor-engine\.mjs$' \
               -e '^apps/rn-playground/' \
               -e '^tests/e2e/mobile/' \
               -e '^mobilewright\.config\.ts$' \
-              -e '^\.github/workflows/react-native\.yml$' \
-              -e '^\.github/workflows/publish-react-native\.yml$' \
               -e '^packages/flutter/' \
               -e '^apps/flutter-playground/' \
               -e '^\.github/actions/engine-tests-kotlin/' \
-              -e '^\.github/workflows/flutter\.yml$' \
-              -e '^\.github/workflows/(release|publish)-flutter\.yml$' \
               -e '^packages/ios/' \
               -e '^apps/ios-playground/' \
               -e '^\.swift-format$' \
-              -e '^\.github/workflows/native-ios\.yml$' \
-              -e '^\.github/workflows/release-ios\.yml$' \
               -e '^packages/android/' \
               -e '^apps/android-playground/' \
-              -e '^\.github/workflows/native-android\.yml$' \
-              -e '^\.github/workflows/release-android\.yml$' \
-              -e '^\.github/workflows/publish-browser\.yml$' \
-              -e '^changelog_unreleased/' \
               "$FILES"; then
             echo 'web-relevant changes found — running the lane'
             echo 'web=true' >> "$GITHUB_OUTPUT"
