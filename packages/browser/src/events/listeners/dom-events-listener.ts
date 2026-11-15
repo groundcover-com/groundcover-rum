@@ -19,6 +19,7 @@ import {
   subtreeHasMaskedContent,
 } from "@/common/accessibility";
 import { redactUrl } from "@groundcover/rum-core/privacy/redaction";
+import { cssIdentifier, cssStringValue } from "@/common/css-escape";
 
 export class DomEventsListener extends BaseListener {
   private eventHandlers: { type: string; handler: EventListener }[] = [];
@@ -250,7 +251,7 @@ export class DomEventsListener extends BaseListener {
         if (currentElement.classList?.length) {
           const safeClasses = Array.from(currentElement.classList)
             .filter((c) => c && typeof c === "string")
-            .map((c) => `.${c}`);
+            .map((c) => `.${cssIdentifier(c)}`);
 
           if (safeClasses.length) {
             elementSelector += safeClasses.join("");
@@ -263,7 +264,7 @@ export class DomEventsListener extends BaseListener {
           try {
             const value = currentElement.getAttribute(attr);
             if (value) {
-              elementSelector += `[${attr}="${value.replace(/"/g, '\\"')}"]`;
+              elementSelector += `[${attr}="${cssStringValue(value)}"]`;
             }
             // eslint-disable-next-line @typescript-eslint/no-unused-vars
           } catch (error) {

@@ -1,0 +1,2 @@
+### Fixed
+- **Browser — an interaction's selector names the clicked element when its classes or attribute values contain CSS syntax.** A class like `md:flex` or `w-1/2`, as utility-class frameworks write them, or an attribute value with a backslash or a line break, made the element's part of the selector invalid or match nothing, so `dom_event_selector` named an ancestor, matched no element, or was just `*`. Those characters are now escaped; an ordinary class or value comes out as before.
