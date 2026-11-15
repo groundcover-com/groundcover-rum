@@ -29,10 +29,10 @@ jobs:
       - name: Pin npm version
         run: npm install -g npm@11.15.0
 
+      # No `version`: pnpm/action-setup takes the exact version from package.json's
+      # `packageManager`, as every CI workflow does, and refuses to run when the two disagree.
       - name: Setup pnpm
         uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
-        with:
-          version: 9
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
