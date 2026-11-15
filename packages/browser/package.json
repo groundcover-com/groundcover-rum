@@ -1,6 +1,6 @@
 {
   "name": "@groundcover/browser",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "groundcover Real User Monitoring (RUM) SDK for the browser \u2014 performance, errors, logs, distributed tracing and session replay",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -14,6 +14,14 @@
     }
   },
   "homepage": "https://docs.groundcover.com/investigate/real-user-monitoring-rum",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/groundcover-com/groundcover-rum.git",
+    "directory": "packages/browser"
+  },
+  "bugs": {
+    "url": "https://github.com/groundcover-com/groundcover-rum/issues"
+  },
   "files": [
     "dist",
     "assets",

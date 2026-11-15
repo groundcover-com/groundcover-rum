@@ -4,6 +4,21 @@ All notable changes to `@groundcover/browser` are documented here. This project 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [2.2.2] — 2026-11-15
+
+### Fixed
+
+- **An interaction's selector names the clicked element when its classes or attribute values
+  contain CSS syntax.** A class like `md:flex` or `w-1/2`, as utility-class frameworks write them,
+  or an attribute value with a backslash or a line break, made the element's part of the selector
+  invalid or match nothing, so `dom_event_selector` named an ancestor, matched no element, or was
+  just `*`. Those characters are now escaped; an ordinary class or value comes out as before.
+
+### Changed
+
+- **The package links to its source.** `repository` and `bugs` point at
+  [groundcover-com/groundcover-rum](https://github.com/groundcover-com/groundcover-rum).
+
 ## [2.2.1] — 2026-11-15
 
 No changes to the SDK's behaviour from `2.2.0`: source comments and documentation only.

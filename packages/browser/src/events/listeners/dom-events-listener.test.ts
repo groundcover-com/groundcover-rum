@@ -199,6 +199,58 @@ describe("dom-events-listener", () => {
       expect(selector).toContain('[title="Test \\"with\\" quotes"]');
     });
 
+    // An attribute value or a class with characters CSS reads as syntax must be
+    // escaped, or the clicked element's part of the selector is invalid (and
+    // dropped) or matches nothing, and the selector names another element or
+    // none: utility classes like `md:flex` used to give just "*". These check the
+    // element's own part (the last one) as text: happy-dom's selector engine
+    // doesn't implement every CSS escape, so it can't confirm the match itself.
+    describe("escapes what CSS would otherwise read as syntax", () => {
+      const ownPart = (target: Element) =>
+        listener.generateSelector(target).split(" > ").pop();
+
+      it("backslashes in attribute values", () => {
+        const other = document.createElement("button");
+        other.setAttribute("title", "other");
+        const button = document.createElement("button");
+        button.setAttribute("title", "C:\\temp\\file");
+        container.append(other, button);
+
+        expect(ownPart(button)).toBe('button[title="C:\\\\temp\\\\file"]');
+      });
+
+      it("line breaks in attribute values", () => {
+        const other = document.createElement("button");
+        other.setAttribute("aria-label", "other");
+        const button = document.createElement("button");
+        button.setAttribute("aria-label", "Close\ndialog");
+        container.append(other, button);
+
+        expect(ownPart(button)).toBe('button[aria-label="Close\\a dialog"]');
+      });
+
+      it("classes that aren't plain identifiers, as utility-class frameworks write them", () => {
+        const other = document.createElement("button");
+        other.className = "plain";
+        const button = document.createElement("button");
+        button.className = "md:flex w-1/2 2xl:hidden";
+        container.append(other, button);
+
+        expect(ownPart(button)).toBe("button.md\\:flex.w-1\\/2.\\32 xl\\:hidden");
+      });
+
+      it("leaves ordinary values and classes as they were", () => {
+        const button = document.createElement("button");
+        button.className = "btn btn-primary_lg";
+        button.setAttribute("aria-label", "Save changes");
+        container.append(button);
+
+        const selector = listener.generateSelector(button);
+        expect(selector).toBe('button.btn.btn-primary_lg[aria-label="Save changes"]');
+        expect(document.querySelector(selector)).toBe(button);
+      });
+    });
+
     it("should generate a selector that identifies the target element", () => {
       // Create multiple similar elements
       for (let i = 0; i < 3; i++) {

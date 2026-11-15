@@ -1,6 +1,10 @@
 {
   "name": "groundcover",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/groundcover-com/groundcover-rum.git"
+  },
   "scripts": {
     "build": "turbo run build",
     "prepare": "node scripts/vendor-engine.mjs",

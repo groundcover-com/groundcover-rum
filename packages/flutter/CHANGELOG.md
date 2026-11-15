@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.1-rc.3
+
+The fourth release candidate. No breaking changes from `0.0.1-rc.2`, and no changes to the SDK's
+behaviour.
+
+### Changed
+
+- **The package links to its source.** `repository` and `issue_tracker` point at
+  [groundcover-com/groundcover-rum](https://github.com/groundcover-com/groundcover-rum).
+
 ## 0.0.1-rc.2
 
 The third release candidate. No breaking changes from `0.0.1-rc.1`, and no changes to the SDK's
