@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, type MockedFunction } from "vitest";
+import { describe, it, expect, beforeEach, vi, type Mock, type MockedFunction } from "vitest";
 import { NetworkEventsListener } from "./network-events-listener";
 import { ConfigManager } from "@groundcover/rum-core/config/config-manager";
 import { EventsPool } from "@groundcover/rum-core/events/events-pool";
@@ -729,7 +729,7 @@ describe("NetworkEventsListener", () => {
     describe("trace propagation with custom header names", () => {
       let mockFetch: MockedFunction<typeof fetch>;
       let mockXHR: Partial<XMLHttpRequest>;
-      let mockSetRequestHeader: ReturnType<typeof vi.fn>;
+      let mockSetRequestHeader: Mock<(name: string, value: string) => void>;
 
       beforeEach(() => {
         // Mock fetch

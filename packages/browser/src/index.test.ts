@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi, type MockInstance } from "vitest";
 import type { ConfigManager } from "@groundcover/rum-core/config/config-manager";
 import type { BaseEvent } from "@groundcover/rum-core/events/types";
 
@@ -110,7 +110,7 @@ describe("SDK public API (index.ts)", () => {
   });
 
   describe("post-init: end-to-end event emission", () => {
-    let addEventSpy: ReturnType<typeof vi.spyOn>;
+    let addEventSpy: MockInstance<(event: BaseEvent) => void>;
 
     beforeEach(() => {
       addEventSpy = vi

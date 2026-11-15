@@ -64,6 +64,10 @@ describe("browser config extension", () => {
       warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     });
 
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
     it("warns when the removed `enableMasking` option is passed", () => {
       browserConfig({
         ...CREDS,

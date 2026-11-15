@@ -137,13 +137,13 @@ const createManager = () =>
 // Listener constructors return a stub instance with the lifecycle methods
 // instrument()/uninstrument() call. (Factories are hoisted, so no shared
 // top-level helper — inline the stub in each.)
-vi.mock("./listeners/dom-events-listener", () => ({ DomEventsListener: vi.fn(() => ({ initialize: vi.fn(), destroy: vi.fn() })) }));
-vi.mock("@groundcover/rum-core/events/listeners/logs-events-listener", () => ({ LogEventsListener: vi.fn(() => ({ initialize: vi.fn(), destroy: vi.fn() })) }));
-vi.mock("./listeners/network-events-listener", () => ({ NetworkEventsListener: vi.fn(() => ({ initialize: vi.fn(), destroy: vi.fn() })) }));
-vi.mock("./listeners/errors-events-listener", () => ({ ErrorsEventsListener: vi.fn(() => ({ initialize: vi.fn(), destroy: vi.fn() })) }));
-vi.mock("./listeners/navigation-listener", () => ({ NavigationListener: vi.fn(() => ({ initialize: vi.fn(), destroy: vi.fn() })) }));
-vi.mock("./listeners/page-load-listener", () => ({ PageLoadListener: vi.fn(() => ({ initialize: vi.fn(), destroy: vi.fn() })) }));
-vi.mock("./listeners/performance-listener", () => ({ PerformanceListener: vi.fn(() => ({ initialize: vi.fn(), destroy: vi.fn() })) }));
+vi.mock("./listeners/dom-events-listener", () => ({ DomEventsListener: vi.fn(function () { return { initialize: vi.fn(), destroy: vi.fn() }; }) }));
+vi.mock("@groundcover/rum-core/events/listeners/logs-events-listener", () => ({ LogEventsListener: vi.fn(function () { return { initialize: vi.fn(), destroy: vi.fn() }; }) }));
+vi.mock("./listeners/network-events-listener", () => ({ NetworkEventsListener: vi.fn(function () { return { initialize: vi.fn(), destroy: vi.fn() }; }) }));
+vi.mock("./listeners/errors-events-listener", () => ({ ErrorsEventsListener: vi.fn(function () { return { initialize: vi.fn(), destroy: vi.fn() }; }) }));
+vi.mock("./listeners/navigation-listener", () => ({ NavigationListener: vi.fn(function () { return { initialize: vi.fn(), destroy: vi.fn() }; }) }));
+vi.mock("./listeners/page-load-listener", () => ({ PageLoadListener: vi.fn(function () { return { initialize: vi.fn(), destroy: vi.fn() }; }) }));
+vi.mock("./listeners/performance-listener", () => ({ PerformanceListener: vi.fn(function () { return { initialize: vi.fn(), destroy: vi.fn() }; }) }));
 
 const INACTIVITY_TIMEOUT_MS = 30 * 60 * 1000;
 const FOUR_HOURS_MS = 4 * 60 * 60 * 1000;

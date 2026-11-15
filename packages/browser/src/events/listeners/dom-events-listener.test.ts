@@ -182,7 +182,18 @@ describe("dom-events-listener", () => {
       div.setAttribute("title", 'Test "with" quotes');
       container.appendChild(div);
 
-      const selector = listener.generateSelector(div);
+      // happy-dom 21's selector parser rejects a backslash-escaped quote inside a
+      // quoted attribute value, which is valid CSS that browsers match. Stand in
+      // for the browser's uniqueness lookup so this test stays about the escaping.
+      const lookup = vi
+        .spyOn(document.body, "querySelectorAll")
+        .mockReturnValue([div] as unknown as NodeListOf<Element>);
+      let selector: string;
+      try {
+        selector = listener.generateSelector(div);
+      } finally {
+        lookup.mockRestore();
+      }
 
       // The quotes should be escaped in the selector
       expect(selector).toContain('[title="Test \\"with\\" quotes"]');
