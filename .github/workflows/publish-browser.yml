@@ -9,9 +9,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    # Enabled in groundcover-rum, where the `npm` environment requires a maintainer's approval and
-    # npm's trusted publishing is bound to it. Here it would be created on first use with no rules.
-    # environment: npm
+    # A maintainer other than the one who started the run approves it, and npm's trusted
+    # publishing accepts a publish only from a run in this environment.
+    environment: npm
     permissions:
       contents: read
       id-token: write
