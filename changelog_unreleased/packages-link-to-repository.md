@@ -1,2 +1,0 @@
-### Changed
-- **All SDKs — each package links to its source.** The npm packages' `repository` and `bugs`, the Flutter package's `repository` and `issue_tracker`, and the Android POM's issue tracker point at [groundcover-com/groundcover-rum](https://github.com/groundcover-com/groundcover-rum). The iOS README says the Swift package is written from that repository at each release, and that issues and pull requests go there.

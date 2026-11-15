@@ -6,6 +6,15 @@ version) are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.0.1-rc.2] — 2026-11-15
+
+The third release candidate. No changes to the SDK's behaviour from `0.0.1-rc.1`.
+
+### Changed
+
+- **The POM names the issue tracker:** GitHub issues in [groundcover-com/groundcover-rum](https://github.com/groundcover-com/groundcover-rum), next to the
+  source links it already had.
+
 ## [0.0.1-rc.1] — 2026-11-15
 
 The second release candidate. No changes to the SDK's behaviour from `0.0.1-rc.0`: source
