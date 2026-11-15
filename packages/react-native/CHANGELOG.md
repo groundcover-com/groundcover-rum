@@ -4,6 +4,18 @@ All notable changes to `@groundcover/react-native` are documented here. This pro
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.0.1-rc.6] — 2026-11-15
+
+Seventh release candidate. No breaking changes from `0.0.1-rc.5`, and no changes to the SDK's
+behaviour.
+
+### Changed
+
+- **The README says which crash reporters run alongside this SDK.** One with handlers of its own
+  does. One built on KSCrash, which is one per process, doesn't: only one of the two captures
+  native crashes on iOS, and if this SDK installs first, the other may delete its unsent crash
+  reports. Start such a reporter before this SDK, or leave its crash reporting out.
+
 ## [0.0.1-rc.5] — 2026-11-05
 
 Sixth release candidate. No breaking changes from `0.0.1-rc.4`. Run `pod install` after upgrading.

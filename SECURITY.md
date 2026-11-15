@@ -16,7 +16,7 @@ Instead, report them privately through either:
 Please include:
 
 - a description of the issue and its impact,
-- the affected package and version (e.g. `@groundcover/browser@2.2.0`),
+- the affected package and version (e.g. `@groundcover/browser@2.2.1`),
 - steps to reproduce or a proof of concept,
 - any suggested remediation.
 

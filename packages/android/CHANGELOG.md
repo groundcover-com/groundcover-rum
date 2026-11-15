@@ -6,6 +6,11 @@ version) are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.0.1-rc.1] — 2026-11-15
+
+The second release candidate. No changes to the SDK's behaviour from `0.0.1-rc.0`: source
+comments and documentation only.
+
 ## [0.0.1-rc.0] — 2026-11-08
 
 The first release candidate. It sends the same `/json/rum` format as groundcover's browser, React

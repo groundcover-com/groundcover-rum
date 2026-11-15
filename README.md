@@ -14,11 +14,11 @@ each package's README is that SDK's reference.
 
 | Package | Platform | Path | Registry | Version | Status |
 | --- | --- | --- | --- | --- | --- |
-| [`@groundcover/browser`](packages/browser) | Web | `packages/browser` | npm | 2.2.0 | Stable |
-| [`@groundcover/react-native`](packages/react-native) | React Native (iOS, Android) | `packages/react-native` | npm, `rc` tag | 0.0.1-rc.5 | Release candidate |
-| [`groundcover_rum`](packages/flutter) | Flutter (iOS, Android) | `packages/flutter` | pub.dev | 0.0.1-rc.1 | Release candidate |
-| [`GroundcoverRum`](packages/ios) | iOS (Swift, Objective-C) | `packages/ios` | Swift Package Manager | 0.0.1-rc.0 | Release candidate |
-| [`rum-android`](packages/android) (+ `-compose`, `-okhttp`, `-timber`) | Android (Kotlin, Java) | `packages/android` | Maven Central | 0.0.1-rc.0 | Release candidate |
+| [`@groundcover/browser`](packages/browser) | Web | `packages/browser` | npm | 2.2.1 | Stable |
+| [`@groundcover/react-native`](packages/react-native) | React Native (iOS, Android) | `packages/react-native` | npm, `rc` tag | 0.0.1-rc.6 | Release candidate |
+| [`groundcover_rum`](packages/flutter) | Flutter (iOS, Android) | `packages/flutter` | pub.dev | 0.0.1-rc.2 | Release candidate |
+| [`GroundcoverRum`](packages/ios) | iOS (Swift, Objective-C) | `packages/ios` | Swift Package Manager | 0.0.1-rc.1 | Release candidate |
+| [`rum-android`](packages/android) (+ `-compose`, `-okhttp`, `-timber`) | Android (Kotlin, Java) | `packages/android` | Maven Central | 0.0.1-rc.1 | Release candidate |
 | `@groundcover/rum-core` | Shared TypeScript core | `packages/core/ts` | Not published | — | Internal |
 
 Each package has its own README, CHANGELOG and LICENSE.

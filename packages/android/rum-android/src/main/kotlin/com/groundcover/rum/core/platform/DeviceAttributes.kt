@@ -7,7 +7,7 @@ import android.os.Build
 internal const val SDK_NAME = "groundcover-rum-android"
 
 /** The SDK's version, as sessions report it. The release sets it. */
-internal const val SDK_VERSION = "0.0.1-rc.0"
+internal const val SDK_VERSION = "0.0.1-rc.1"
 
 /** The app's version and build, as its package declares them. */
 internal class InstalledVersion(val version: String?, val build: String?)
