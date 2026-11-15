@@ -1,0 +1,133 @@
+name: CodeQL
+
+# Code scanning for the SDKs, in place of CodeQL's default setup. Default setup has no way to
+# say how to build a language, and it guesses wrong here:
+#
+# - Swift: its autobuild picks the first Xcode workspace it finds, the Flutter playground's
+#   Runner.xcworkspace, which can't resolve its packages without Flutter's generated files. The
+#   build fails and the scan covers 12 of the repo's 155 Swift files: the iOS SDK goes unscanned.
+# - Kotlin: its autobuild looks for Gradle at the repository root, finds none (the SDK's build is
+#   in packages/android) and fails, so default setup drops the language altogether.
+# - Ruby: it counts the two .podspec files as Ruby, finds no Ruby to scan and fails. There is no
+#   Ruby to scan, so it has no job here.
+#
+# So each compiled language builds the SDK the way its own lane does: java-kotlin builds
+# packages/android, which compiles the Kotlin engine straight from packages/core/kotlin, and swift
+# builds packages/ios. The iOS SDK compiles a git-ignored copy of the engine
+# (scripts/vendor-engine.mjs), so a Swift finding in the engine names the copy's path,
+# packages/ios/Sources/GroundcoverRum/Engine/..., not packages/core/swift/Engine/..., which is the
+# file to fix.
+#
+# Each analysis keeps the category default setup gave it (/language:<language>), so the Security
+# tab lists the languages as before.
+#
+# GitHub refuses results from this workflow while default setup is on: turn default setup off
+# (Settings → Code security → CodeQL analysis) when this merges.
+#
+# GitHub-hosted runners, not Blacksmith: they cost nothing on a public repository, and the job
+# that can write security results stays on GitHub's own machines.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Weekly, as default setup ran, so a new query finds what's already on main.
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Only PR runs are cancelled: a main run is the post-merge signal and must always finish.
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: '24.x'
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.timeout }}
+    permissions:
+      contents: read
+      security-events: write # upload the results
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: actions
+            build-mode: none
+            runner: ubuntu-24.04
+            timeout: 10
+          - language: javascript-typescript
+            build-mode: none
+            runner: ubuntu-24.04
+            timeout: 30
+          - language: java-kotlin
+            build-mode: manual
+            runner: ubuntu-24.04
+            timeout: 30
+          # CodeQL's Swift extractor runs on macOS only. macos-latest, as default setup used, so
+          # the Xcode is one CodeQL supports.
+          - language: swift
+            build-mode: manual
+            runner: macos-latest
+            timeout: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Java 17, as Native Android CI builds with.
+      - if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@77dd5b2ce225ea11469928ac317850245a74ae78 # v6.2.0
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # The iOS SDK compiles the engine from its git-ignored copy; write it before the build, as
+      # packages/ios/scripts/api-surface.sh does. Node's standard library only, so no install.
+      - if: matrix.language == 'swift'
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Write the iOS SDK's engine copy
+        if: matrix.language == 'swift'
+        run: node scripts/vendor-engine.mjs
+
+      - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      # The SDK and its three integration modules. No Gradle cache, so every source compiles where
+      # CodeQL can see it; the Kotlin compiler runs in-process for the same reason, as CodeQL's own
+      # autobuild runs it.
+      - name: Build the Android SDK
+        if: matrix.language == 'java-kotlin'
+        working-directory: packages/android
+        run: ./gradlew assembleDebug --no-daemon --no-build-cache -Pkotlin.compiler.execution.strategy=in-process
+
+      # Every library target of the package (the SDK, its Objective-C facade and the swift-log
+      # bridge), for the simulator, with the build settings CodeQL's own autobuild passes.
+      - name: Build the iOS SDK
+        if: matrix.language == 'swift'
+        working-directory: packages/ios
+        run: |
+          xcodebuild build \
+            -scheme GroundcoverRum-Package \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            COMPILATION_CACHE_ENABLE_CACHING=NO \
+            SWIFT_ENABLE_COMPILE_CACHE=NO \
+            SWIFT_USE_INTEGRATED_DRIVER=NO
+
+      - uses: github/codeql-action/analyze@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+        with:
+          category: /language:${{ matrix.language }}
