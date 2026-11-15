@@ -1,6 +1,6 @@
 {
   "name": "@groundcover/react-native",
-  "version": "0.0.1-rc.6",
+  "version": "0.0.1-rc.7",
   "description": "groundcover Real User Monitoring (RUM) SDK for React Native — sessions, network + distributed tracing, screen navigation, tap, typing and gesture interactions, logs, custom events and JS errors. On a dev build it also captures native crashes, ANR/app-hangs, app start + TTI and frame vitals.",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -16,6 +16,14 @@
   },
   "react-native": "dist/index.mjs",
   "homepage": "https://docs.groundcover.com/investigate/real-user-monitoring-rum",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/groundcover-com/groundcover-rum.git",
+    "directory": "packages/react-native"
+  },
+  "bugs": {
+    "url": "https://github.com/groundcover-com/groundcover-rum/issues"
+  },
   "files": [
     "dist",
     "assets",
