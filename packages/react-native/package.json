@@ -16,6 +16,14 @@
   },
   "react-native": "dist/index.mjs",
   "homepage": "https://docs.groundcover.com/investigate/real-user-monitoring-rum",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/groundcover-com/groundcover-rum.git",
+    "directory": "packages/react-native"
+  },
+  "bugs": {
+    "url": "https://github.com/groundcover-com/groundcover-rum/issues"
+  },
   "files": [
     "dist",
     "assets",
