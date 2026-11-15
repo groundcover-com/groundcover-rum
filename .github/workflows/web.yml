@@ -4,10 +4,11 @@ name: Web CI
 # every workspace package and drives apps/playground in chromium, firefox and
 # webkit.
 #
-# The lane skips diffs that can only affect the mobile SDKs (React Native,
-# Flutter, the native iOS and Android SDKs, and the native engine they share): a
-# mobile-only change cannot reach the browser bundle, so the build plus the whole
-# browser suite would be pure waste on every mobile PR.
+# The lane skips diffs that cannot change the browser bundle: those that only
+# affect the mobile SDKs (React Native, Flutter, the native iOS and Android SDKs,
+# and the native engine they share), and the publish and release workflows, which
+# ship a package but never build what this suite tests. For those, the build plus
+# the whole browser suite would be pure waste.
 #
 # That skip lives in the `changes` job, NOT in a trigger-level `paths-ignore`,
 # and the difference is load-bearing rather than stylistic. A workflow skipped by
@@ -92,7 +93,10 @@ jobs:
             exit 0
           fi
           # `grep -v` with several -e patterns selects lines matching NONE of
-          # them, so this asks "is any changed file outside the mobile-only set?".
+          # them, so this asks "is any changed file outside the set below?": the
+          # mobile-only paths, and the publish and release workflows. Those only
+          # run by hand and build their own package, so none of them changes the
+          # bundle this suite tests, publish-browser.yml included.
           if grep -qvE \
               -e '^packages/react-native/' \
               -e '^packages/core/swift/' \
@@ -103,6 +107,7 @@ jobs:
               -e '^tests/e2e/mobile/' \
               -e '^mobilewright\.config\.ts$' \
               -e '^\.github/workflows/react-native\.yml$' \
+              -e '^\.github/workflows/publish-react-native\.yml$' \
               -e '^packages/flutter/' \
               -e '^apps/flutter-playground/' \
               -e '^\.github/actions/engine-tests-kotlin/' \
@@ -112,15 +117,18 @@ jobs:
               -e '^apps/ios-playground/' \
               -e '^\.swift-format$' \
               -e '^\.github/workflows/native-ios\.yml$' \
+              -e '^\.github/workflows/release-ios\.yml$' \
               -e '^packages/android/' \
               -e '^apps/android-playground/' \
               -e '^\.github/workflows/native-android\.yml$' \
+              -e '^\.github/workflows/release-android\.yml$' \
+              -e '^\.github/workflows/publish-browser\.yml$' \
               -e '^changelog_unreleased/' \
               "$FILES"; then
             echo 'web-relevant changes found — running the lane'
             echo 'web=true' >> "$GITHUB_OUTPUT"
           else
-            echo 'mobile-only diff — skipping the web lane'
+            echo 'nothing the browser bundle depends on changed — skipping the web lane'
             echo 'web=false' >> "$GITHUB_OUTPUT"
           fi
 
@@ -396,7 +404,7 @@ jobs:
 
   # The required status check for this lane.
   #
-  # It reports on EVERY PR, including mobile-only ones where the work above is
+  # It reports on EVERY PR, including the ones where the work above is
   # skipped — which is why the filter is not on the trigger. It also
   # gives the lane ONE stable name: the shard jobs carry their count, so pinning
   # those in a required-checks list breaks the moment the count changes.
