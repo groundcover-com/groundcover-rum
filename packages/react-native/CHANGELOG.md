@@ -4,6 +4,16 @@ All notable changes to `@groundcover/react-native` are documented here. This pro
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.0.1-rc.7] — 2026-11-15
+
+Eighth release candidate. No breaking changes from `0.0.1-rc.6`, and no changes to the SDK's
+behaviour.
+
+### Changed
+
+- **The package links to its source.** `repository` and `bugs` point at
+  [groundcover-com/groundcover-rum](https://github.com/groundcover-com/groundcover-rum).
+
 ## [0.0.1-rc.6] — 2026-11-15
 
 Seventh release candidate. No breaking changes from `0.0.1-rc.5`, and no changes to the SDK's

@@ -43,8 +43,8 @@ version, and a file whose lines have all shipped is deleted.
   `--update`) and `packages/android/*/api/` (`./gradlew apiCheck`, accept with `./gradlew apiDump`).
   A PR that changes what customers can call shows it as a diff there.
 - **Nothing internal ships.** A published package (npm tarball, pub.dev archive, the iOS source
-  mirror, Maven artifacts) must not contain paths into this repo, internal identifiers, people's
-  names or secrets, comments included. Check the exact upload set before a release:
+  mirror, Maven artifacts) must not contain paths into this repo (a link to it on GitHub is fine),
+  internal identifiers, people's names or secrets, comments included. Check the exact upload set before a release:
   `npm pack --dry-run`, `dart pub publish --dry-run`, `packages/ios/scripts/build-mirror.sh <dir>`,
   and the `maven-upload-set` artifact of a `release-android.yml` run (locally,
   `./gradlew publishToMavenLocal` in `packages/android`).
