@@ -99,6 +99,18 @@ jobs:
         if: matrix.language == 'swift'
         run: node scripts/vendor-engine.mjs
 
+      # SwiftPM's package resolution (cloning KSCrash and swift-log) stalls under CodeQL's build
+      # tracer: twice the build sat at "Resolve Package Graph" for eight minutes without compiling
+      # anything. So the packages are resolved here, before init starts tracing, into the
+      # DerivedData the build uses, and the build doesn't resolve them again.
+      - name: Resolve the iOS SDK's packages
+        if: matrix.language == 'swift'
+        working-directory: packages/ios
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -scheme GroundcoverRum-Package \
+            -derivedDataPath "$RUNNER_TEMP/DerivedData"
+
       - uses: github/codeql-action/init@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
         with:
           languages: ${{ matrix.language }}
@@ -122,6 +134,7 @@ jobs:
             -scheme GroundcoverRum-Package \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath "$RUNNER_TEMP/DerivedData" \
+            -disableAutomaticPackageResolution \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             COMPILATION_CACHE_ENABLE_CACHING=NO \
