@@ -21,28 +21,28 @@ name: CodeQL
 # Each analysis keeps the category default setup gave it (/language:<language>), so the Security
 # tab lists the languages as before.
 #
-# GitHub refuses results from this workflow while default setup is on: turn default setup off
-# (Settings → Code security → CodeQL analysis) when this merges.
+# Default setup has to stay off (Settings → Code security → CodeQL analysis): GitHub refuses
+# results from this workflow while it is on.
 #
 # GitHub-hosted runners, not Blacksmith: they cost nothing on a public repository, and the job
 # that can write security results stays on GitHub's own machines.
+#
+# It runs on every push to main, and by hand (Actions → CodeQL → Run workflow). Not on pull
+# requests and not on a schedule: a change's findings reach the Security tab once it merges, and
+# main is scanned again whenever it changes.
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
-  # Weekly, as default setup ran, so a new query finds what's already on main.
-  schedule:
-    - cron: '17 4 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Only PR runs are cancelled: a main run is the post-merge signal and must always finish.
+# A running scan is never cancelled. A push that lands mid-scan waits for it; if several do, only
+# the newest waits (GitHub drops the older pending runs), and its scan covers all of them.
 concurrency:
   group: codeql-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  cancel-in-progress: false
 
 env:
   NODE_VERSION: '24.x'
