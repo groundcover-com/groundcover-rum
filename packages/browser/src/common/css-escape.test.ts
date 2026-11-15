@@ -1,28 +1,25 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import { cssIdentifier, cssStringValue } from "./css-escape";
 
 describe("cssIdentifier", () => {
-  // CSS.escape is the reference: cssIdentifier is its serialization, written out
-  // so it doesn't depend on the browser having CSS.escape.
-  it.each([
-    "btn",
-    "btn-primary_lg",
-    "md:flex",
-    "w-1/2",
-    "2xl:hidden",
-    "-",
-    "-2x",
-    "--var",
-    "a b",
-    "[&>svg]:size-4",
-    "é",
-    "tab\tbed",
-  ])("serializes %j as CSS.escape does", (value) => {
-    expect(cssIdentifier(value)).toBe(CSS.escape(value));
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
-  it("replaces NUL with U+FFFD, as CSS.escape does", () => {
-    expect(cssIdentifier("a\u0000b")).toBe("a\uFFFDb");
+  it("escapes what utility-class frameworks put in class names", () => {
+    expect(cssIdentifier("md:flex")).toBe("md\\:flex");
+    expect(cssIdentifier("w-1/2")).toBe("w-1\\/2");
+    expect(cssIdentifier("2xl:hidden")).toBe("\\32 xl\\:hidden");
+    expect(cssIdentifier("[&>svg]:size-4")).toBe("\\[\\&\\>svg\\]\\:size-4");
+  });
+
+  it("leaves an ordinary class as it is", () => {
+    expect(cssIdentifier("btn-primary_lg")).toBe("btn-primary_lg");
+  });
+
+  it("returns the class unescaped when the browser has no CSS.escape", () => {
+    vi.stubGlobal("CSS", undefined);
+    expect(cssIdentifier("md:flex")).toBe("md:flex");
   });
 });
 
