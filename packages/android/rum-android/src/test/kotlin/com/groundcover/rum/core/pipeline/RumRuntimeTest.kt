@@ -14,6 +14,7 @@ import com.groundcover.rum.core.events.LogCapture
 import com.groundcover.rum.core.events.LogLevel
 import com.groundcover.rum.core.transport.BatchRequest
 import com.groundcover.rum.core.transport.BatchSender
+import com.groundcover.rum.core.transport.SendOutcome
 import java.util.Collections
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.Assert.assertEquals
@@ -44,9 +45,9 @@ private fun aRuntimeConfig(
 private class ThreadRecordingSender : BatchSender {
     val threads: MutableList<Thread> = Collections.synchronizedList(mutableListOf())
 
-    override fun send(endpoint: String, request: BatchRequest, completion: (Boolean) -> Unit) {
+    override fun send(endpoint: String, request: BatchRequest, completion: (SendOutcome) -> Unit) {
         threads.add(Thread.currentThread())
-        completion(true)
+        completion(SendOutcome.Delivered)
     }
 }
 

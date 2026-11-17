@@ -1,6 +1,7 @@
 package com.groundcover.rum.core.platform
 
 import com.groundcover.rum.core.transport.BatchRequest
+import com.groundcover.rum.core.transport.SendOutcome
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import okhttp3.mockwebserver.MockResponse
@@ -8,13 +9,12 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-// The batch sender as it talks to a server: the POST it makes, and the delivery verdict, against a
-// local MockWebServer so nothing leaves the machine.
+// The batch sender as it talks to a server: the POST it makes, and how it ended, against a local
+// MockWebServer so nothing leaves the machine.
 class HttpBatchSenderTest {
     private val server = MockWebServer()
 
@@ -31,24 +31,27 @@ class HttpBatchSenderTest {
     private fun send(
         endpoint: String = server.url("/json/rum").toString(),
         headers: Map<String, String> = mapOf("apikey" to "k")
-    ): Boolean {
+    ): SendOutcome {
         val latch = CountDownLatch(1)
-        var delivered: Boolean? = null
+        var outcome: SendOutcome? = null
         HttpBatchSender().send(
             endpoint,
             BatchRequest(headers, "{\"events\":[]}".toByteArray(Charsets.UTF_8))
         ) {
-            delivered = it
+            outcome = it
             latch.countDown()
         }
         assertTrue("the sender completes", latch.await(10, TimeUnit.SECONDS))
-        return delivered!!
+        return outcome!!
     }
 
     @Test
     fun postsTheBodyAndHeadersAndCallsA2xxDelivered() {
         server.enqueue(MockResponse().setResponseCode(200))
-        assertTrue(send(headers = mapOf("apikey" to "k", "Content-Type" to "application/json")))
+        assertEquals(
+            SendOutcome.Delivered,
+            send(headers = mapOf("apikey" to "k", "Content-Type" to "application/json"))
+        )
         val request = server.takeRequest(5, TimeUnit.SECONDS)!!
         assertEquals("POST", request.method)
         assertEquals("/json/rum", request.path)
@@ -58,19 +61,19 @@ class HttpBatchSenderTest {
     }
 
     @Test
-    fun aNon2xxAnswerIsNotDelivered() {
-        server.enqueue(MockResponse().setResponseCode(500))
-        assertFalse(send())
+    fun aNon2xxAnswerIsRejectedWithItsStatus() {
+        server.enqueue(MockResponse().setResponseCode(401))
+        assertEquals(SendOutcome.Rejected(401), send())
     }
 
     @Test
-    fun aNetworkFailureIsNotDelivered() {
+    fun aNetworkFailureFails() {
         server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.DISCONNECT_AT_START))
-        assertFalse(send())
+        assertEquals(SendOutcome.Failed, send())
     }
 
     @Test
-    fun anEndpointThatIsNotAUrlIsNotDelivered() {
-        assertFalse(send(endpoint = ""))
+    fun anEndpointThatIsNotAUrlFails() {
+        assertEquals(SendOutcome.Failed, send(endpoint = ""))
     }
 }
