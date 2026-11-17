@@ -363,6 +363,31 @@ describe("drainNativeCrashReports", () => {
     expect(native.clearPendingCrashReports).toHaveBeenCalledWith(["crash-1"]);
   });
 
+  // The hook gets a copy, so one that changes the event and then throws leaves no trace. This
+  // report is acked once sent, so what ships is the only copy kept.
+  it("sends the report exactly as built when enrichEvent changes it and then throws", async () => {
+    const native = nativeStub([record()]);
+
+    await drain(
+      native,
+      configManager({
+        enrichEvent: (event: { timestamp: number; attributes: Record<string, unknown> }) => {
+          event.timestamp = 1;
+          event.attributes["error_message"] = "rewritten by the hook";
+          delete (event.attributes["error_metadata"] as Record<string, unknown>)["crash_report_id"];
+          throw new Error("host enrichEvent broke halfway");
+        },
+      })
+    );
+
+    const event = sentBatches(fetchMock)[0]!.events[0]! as Record<string, unknown>;
+    expect(event["timestamp"]).toBe(msToNs(CRASH_EPOCH_MS));
+    const attrs = event["attributes"] as Record<string, unknown>;
+    expect(attrs["error_message"]).not.toBe("rewritten by the hook");
+    expect(attrs["error_metadata.crash_report_id"]).toBe("crash-1");
+    expect(native.clearPendingCrashReports).toHaveBeenCalledWith(["crash-1"]);
+  });
+
   it("applies enrichEvent", async () => {
     const native = nativeStub([record()]);
     const enrichEvent = (event: { attributes: Record<string, unknown> }) => ({

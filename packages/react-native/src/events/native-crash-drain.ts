@@ -146,8 +146,21 @@ async function reportOne(record: PendingCrashRecord, deps: DrainDeps): Promise<b
   // It falls back to the built event instead. Without the check a hook returning a truthy
   // non-event (`{}` from an untyped JS caller, or an implicit-return arrow) is adopted
   // wholesale and a typeless husk goes on the wire in place of the crash report.
-  const enriched = runCallback(() => options?.enrichEvent?.(event as never) ?? event);
-  if (enriched.ok && isUsableEvent(enriched.value)) event = enriched.value as typeof event;
+  //
+  // The hook gets a COPY. Falling back to the built event only helps if the hook could not
+  // touch it: one that changes the timestamp or the report id and then throws would otherwise
+  // ship its half-done edits, and the record is acked after the send, so the original is gone.
+  // A JSON copy is enough (the event is about to be sent as JSON) and works on every engine,
+  // which `structuredClone` does not.
+  const enrichEvent = options?.enrichEvent;
+  if (enrichEvent) {
+    const built = event;
+    const enriched = runCallback(() => {
+      const copy = JSON.parse(JSON.stringify(built)) as typeof built;
+      return enrichEvent(copy as never) ?? copy;
+    });
+    if (enriched.ok && isUsableEvent(enriched.value)) event = enriched.value as typeof event;
+  }
 
   return sendUnderSnapshot({ deps, sessionAttributes, event });
 }
