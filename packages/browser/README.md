@@ -372,8 +372,9 @@ These are always treated as sensitive (case-insensitive); your `sensitiveKeys` a
 - **Key substrings** — matched as a substring of a body/query key or a DOM element attribute
   (`id`/`name`/`class`/`aria-label`/`placeholder`):
   `token`, `secret`, `passwd`, `password`, `api_key`, `access_key`, `write_key`, `auth`, `bearer`,
-  `credential`, `cvv`, `ssn`, `credit_card`, `card_number` (the `_` in the last five is optional —
-  `apikey` / `api-key` also match).
+  `credential`, `cvv`, `ssn`, `credit_card`, `card_number`. For `api_key`, `access_key`,
+  `write_key`, `credit_card` and `card_number` the separator is flexible — absent, `_` or `-` all
+  match, so `apikey`, `api_key` and `api-key` are equivalent. The rest match literally.
 - **Request/response headers** — always stripped regardless of `level`: `authorization`, `cookie`,
   `set-cookie`, plus any header name containing `token`, `key`, `secret`, `passwd`, `password`,
   `auth`, `bearer`, or `credential`.
