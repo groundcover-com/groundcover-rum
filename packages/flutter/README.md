@@ -196,9 +196,9 @@ Navigator.of(context).push(
 
 ### Check that data arrives
 
-1. Set `debug: true` in `GroundcoverOptions` for the first run. Errors are silent without it: a
-   wrong key or `dsn` fails each batch with nothing in the console, and an empty `cluster` holds
-   every event.
+1. Set `debug: true` in `GroundcoverOptions` for the first run. Without it, the console shows
+   only a refused key (`[groundcover] … rejected a batch with HTTP 401`, once): a wrong `dsn` fails
+   each batch with nothing in the console, and an empty `cluster` holds every event.
 2. Run the app and **touch it once**. Nothing is sent until a touch, or a return to the
    foreground, confirms that a user is there.
 3. Within about 10 seconds the console shows `[groundcover] Sending batch:` and the events. A
