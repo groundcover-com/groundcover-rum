@@ -653,6 +653,79 @@ void main() {
       );
     });
 
+    group('a refused batch', () {
+      const endpoint = 'https://ingest.example/json/rum';
+      late List<String> lines;
+      late DiagnosticSink sink;
+
+      setUp(() {
+        lines = <String>[];
+        sink = RumDiagnostics.instance.sink;
+        RumDiagnostics.instance.sink = lines.add;
+      });
+      tearDown(
+        () => RumDiagnostics.instance
+          ..sink = sink
+          ..configure(debug: false),
+      );
+
+      BatchSender refusing(int status) =>
+          (endpoint, request) async => throw IngestRejected(status);
+      Iterable<String> warnings() =>
+          lines.where((l) => l.contains('rejected a batch'));
+
+      test('a 401 or 403 warns once per status, with debug off', () async {
+        for (final status in [401, 403]) {
+          final transporter = Transporter(
+            config: configWith(),
+            sendBatch: refusing(status),
+          );
+          await transporter.send(batch());
+          await transporter.send(batch());
+          await drain();
+        }
+        expect(warnings(), [
+          '[groundcover] $endpoint rejected a batch with HTTP 401. Check the '
+              'apiKey and dsn passed to GroundcoverRum.init(): no RUM data is '
+              'recorded until they are accepted. (groundcoverIgnore)',
+          contains('HTTP 403'),
+        ]);
+      });
+
+      test('any other status is only logged, and only in debug', () async {
+        await Transporter(
+          config: configWith(),
+          sendBatch: refusing(500),
+        ).send(batch());
+        await drain();
+        expect(lines, isEmpty);
+
+        RumDiagnostics.instance.configure(debug: true);
+        await Transporter(
+          config: configWith(debug: true),
+          sendBatch: refusing(500),
+        ).send(batch());
+        await drain();
+        expect(
+          lines,
+          contains(endsWith('Batch rejected by $endpoint with HTTP 500')),
+        );
+        expect(warnings(), isEmpty);
+      });
+
+      test(
+        'a delivery the endpoint refuses warns too, and is not delivered',
+        () async {
+          final delivered = await Transporter(
+            config: configWith(),
+            sendBatch: refusing(401),
+          ).deliver(batch());
+          expect(delivered, isFalse);
+          expect(warnings(), [contains('HTTP 401')]);
+        },
+      );
+    });
+
     test('sends nothing without an API key', () async {
       final platform = FakePlatform();
       await Transporter(

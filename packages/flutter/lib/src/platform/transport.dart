@@ -68,10 +68,10 @@ final class HttpBatchSender {
       final response = await open.close();
       // Read to the end, so the connection can be reused.
       await (body = response.listen(null)).asFuture<void>();
-      // Not delivered: the live path only logs it, and the crash drain keeps
+      // Not delivered: the transporter reports it, and the crash drain keeps
       // the record for the next launch.
       if (response.statusCode < 200 || response.statusCode > 299) {
-        throw HttpException('the ingest answered ${response.statusCode}');
+        throw IngestRejected(response.statusCode);
       }
     }
 

@@ -310,7 +310,7 @@ void main() {
       final url = 'http://127.0.0.1:${server.port}/json/rum';
       await expectLater(
         HttpBatchSender().call(url, batch()),
-        throwsA(isA<HttpException>()),
+        throwsA(isA<IngestRejected>().having((e) => e.status, 'status', 503)),
       );
       status = 202;
       await HttpBatchSender().call(url, batch());
