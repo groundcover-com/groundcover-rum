@@ -110,6 +110,64 @@ private func aTransporter(
         #expect(verdicts.all == [true, false, false])
         #expect(platform.requests.count == 2, "nothing is sent without an API key")
     }
+
+    // A refused batch, as the browser SDK reports it: a 401 or 403 warns once per status even
+    // with debug off, since a refused key silently drops every batch; any other status is only
+    // logged in debug.
+    final class Lines: @unchecked Sendable { var all: [String] = [] }
+
+    @Test func aRefusedKeyWarnsOncePerStatusWithDebugOff() {
+        let lines = Lines()
+        let diagnostics = RumDiagnostics(sink: { lines.all.append($0) })
+        let platform = FakePlatform()
+        let transporter = aTransporter(aConfig(), platform, diagnostics: diagnostics)
+        platform.sender.outcome = .rejected(status: 401)
+        transporter.send(aBatch())
+        transporter.send(aBatch())
+        platform.sender.outcome = .rejected(status: 403)
+        transporter.send(aBatch())
+        #expect(
+            lines.all == [
+                "[groundcover] https://ingest.example/json/rum rejected a batch with HTTP 401. "
+                    + "Check the apiKey and dsn passed to Groundcover.start(): no RUM data is "
+                    + "recorded until they are accepted.",
+                "[groundcover] https://ingest.example/json/rum rejected a batch with HTTP 403. "
+                    + "Check the apiKey and dsn passed to Groundcover.start(): no RUM data is "
+                    + "recorded until they are accepted.",
+            ])
+    }
+
+    @Test func anotherRefusalIsOnlyLoggedInDebug() {
+        let lines = Lines()
+        let diagnostics = RumDiagnostics(sink: { lines.all.append($0) })
+        let platform = FakePlatform()
+        platform.sender.outcome = .rejected(status: 500)
+        aTransporter(aConfig(), platform, diagnostics: diagnostics).send(aBatch())
+        #expect(lines.all.isEmpty)
+
+        diagnostics.configure(debug: true)
+        aTransporter(aConfig(debug: true), platform, diagnostics: diagnostics).send(aBatch())
+        #expect(
+            lines.all.contains {
+                $0.hasSuffix("Batch rejected by https://ingest.example/json/rum with HTTP 500")
+            })
+        #expect(!lines.all.contains { $0.contains("rejected a batch") })
+    }
+
+    @Test func aRefusedDeliveryWarnsAndIsNotDelivered() {
+        final class Verdicts: @unchecked Sendable { var all: [Bool] = [] }
+        let verdicts = Verdicts()
+        let lines = Lines()
+        let diagnostics = RumDiagnostics(sink: { lines.all.append($0) })
+        let platform = FakePlatform()
+        platform.sender.outcome = .rejected(status: 401)
+        aTransporter(aConfig(), platform, diagnostics: diagnostics).deliver(aBatch()) {
+            verdicts.all.append($0)
+        }
+        #expect(verdicts.all == [false])
+        #expect(lines.all.count == 1)
+        #expect(lines.all.first?.contains("HTTP 401") == true)
+    }
 }
 
 @Suite struct GzipTests {

@@ -43,9 +43,10 @@ final class URLSessionBatchSender: BatchSender {
         session = URLSession(configuration: configuration, delegate: nil, delegateQueue: queue)
     }
 
-    func send(endpoint: String, request: BatchRequest, completion: @escaping (Bool) -> Void) {
+    func send(endpoint: String, request: BatchRequest, completion: @escaping (SendOutcome) -> Void)
+    {
         guard let url = URL(string: endpoint), url.scheme != nil else {
-            completion(false)
+            completion(.failed)
             return
         }
         var urlRequest = URLRequest(url: url)
@@ -56,9 +57,12 @@ final class URLSessionBatchSender: BatchSender {
         urlRequest.httpBody = request.body
         let endKeepAlive = keepAlive()
         session.dataTask(with: urlRequest) { _, response, error in
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             endKeepAlive()
-            completion(error == nil && (200..<300).contains(status))
+            guard error == nil, let status = (response as? HTTPURLResponse)?.statusCode else {
+                completion(.failed)
+                return
+            }
+            completion((200..<300).contains(status) ? .delivered : .rejected(status: status))
         }.resume()
     }
 }

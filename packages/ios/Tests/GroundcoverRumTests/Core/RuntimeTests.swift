@@ -57,9 +57,10 @@ private final class Signal<Value>: @unchecked Sendable {
 private final class ThreadRecordingSender: BatchSender, @unchecked Sendable {
     let sentOnMain = Signal<Bool>()
 
-    func send(endpoint: String, request: BatchRequest, completion: @escaping (Bool) -> Void) {
+    func send(endpoint: String, request: BatchRequest, completion: @escaping (SendOutcome) -> Void)
+    {
         sentOnMain.send(Thread.isMainThread)
-        completion(true)
+        completion(.delivered)
     }
 }
 

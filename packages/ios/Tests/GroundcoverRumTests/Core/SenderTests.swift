@@ -52,7 +52,7 @@ private func aSender() -> URLSessionBatchSender {
 }
 
 private func send(_ sender: URLSessionBatchSender, headers: [String: String] = ["apikey": "k"])
-    async -> Bool
+    async -> SendOutcome
 {
     await withCheckedContinuation { continuation in
         sender.send(
@@ -71,9 +71,9 @@ private func send(_ sender: URLSessionBatchSender, headers: [String: String] = [
     }
 
     @Test func postsTheBodyAndHeadersAndCallsA2xxDelivered() async throws {
-        let delivered = await send(
+        let outcome = await send(
             aSender(), headers: ["apikey": "k", "Content-Type": "application/json"])
-        #expect(delivered)
+        #expect(outcome == .delivered)
         let request = try #require(StubProtocol.seen.first)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "https://ingest.example/json/rum")
@@ -94,31 +94,31 @@ private func send(_ sender: URLSessionBatchSender, headers: [String: String] = [
             keepAlives.begun += 1
             return { keepAlives.ended += 1 }
         }
-        #expect(await send(sender))
+        #expect(await send(sender) == .delivered)
         #expect(keepAlives.begun == 1)
         #expect(keepAlives.ended == 1)
         StubProtocol.fails = true
-        #expect(await send(sender) == false)
+        #expect(await send(sender) == .failed)
         #expect(keepAlives.begun == 2)
         #expect(keepAlives.ended == 2)
     }
 
-    @Test func aNon2xxAnswerIsNotDelivered() async {
-        StubProtocol.status = 500
-        #expect(await send(aSender()) == false)
+    @Test func aNon2xxAnswerIsRejectedWithItsStatus() async {
+        StubProtocol.status = 401
+        #expect(await send(aSender()) == .rejected(status: 401))
     }
 
-    @Test func aNetworkFailureIsNotDelivered() async {
+    @Test func aNetworkFailureFails() async {
         StubProtocol.fails = true
-        #expect(await send(aSender()) == false)
+        #expect(await send(aSender()) == .failed)
     }
 
-    @Test func anEndpointThatIsNotAUrlIsNotDelivered() async {
-        let delivered = await withCheckedContinuation { continuation in
+    @Test func anEndpointThatIsNotAUrlFails() async {
+        let outcome = await withCheckedContinuation { continuation in
             aSender().send(endpoint: "", request: BatchRequest(headers: [:], body: Data())) {
                 continuation.resume(returning: $0)
             }
         }
-        #expect(!delivered)
+        #expect(outcome == .failed)
     }
 }

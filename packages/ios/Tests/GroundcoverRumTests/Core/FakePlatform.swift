@@ -92,7 +92,13 @@ struct SentRequest {
 /// A sender that records every request instead of sending it.
 final class RecordingSender: BatchSender {
     var requests: [SentRequest] = []
-    var delivers = true
+    /// How every send ends.
+    var outcome: SendOutcome = .delivered
+    /// Shorthand for ``outcome``: delivered, or failed without an answer.
+    var delivers: Bool {
+        get { outcome.isDelivered }
+        set { outcome = newValue ? .delivered : .failed }
+    }
 
     /// Runs as a request is handed over, before it completes.
     var onSend: (() -> Void)?
@@ -101,14 +107,15 @@ final class RecordingSender: BatchSender {
     var holdsCompletions = false
     private var held: [() -> Void] = []
 
-    func send(endpoint: String, request: BatchRequest, completion: @escaping (Bool) -> Void) {
+    func send(endpoint: String, request: BatchRequest, completion: @escaping (SendOutcome) -> Void)
+    {
         requests.append(SentRequest(url: endpoint, headers: request.headers, body: request.body))
         onSend?()
-        let delivered = delivers
+        let outcome = outcome
         if holdsCompletions {
-            held.append { completion(delivered) }
+            held.append { completion(outcome) }
         } else {
-            completion(delivered)
+            completion(outcome)
         }
     }
 
