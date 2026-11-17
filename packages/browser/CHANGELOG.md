@@ -4,6 +4,30 @@ All notable changes to `@groundcover/browser` are documented here. This project 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [2.2.3] — 2026-11-17
+
+### Fixed
+
+- **A batch the ingest endpoint refuses is no longer silent.** When the endpoint answers 401 or
+  403, the SDK warns on the console once, even with `debug` off, so a wrong `apiKey` or `dsn` no
+  longer looks like a working SDK. Any other non-2xx response is logged with its status when
+  `debug` is on.
+- **`data:` and `blob:` URLs are no longer captured as network requests.** They are read from
+  memory, not the network. A large `data:` URL, such as an image preview the page reads with
+  `fetch`, was copied into every URL field of its event.
+- **An out-of-range `sessionMaxDuration` in `updateConfig` keeps the current cap.** It used to
+  reset the cap to the 4-hour default, undoing the value chosen at `init`. The warning now names
+  the cap in use.
+
+### Changed
+
+- **fflate 0.8.3.** The SDK now depends on fflate 0.8.3, which fixes an infinite loop in fflate's
+  ZIP64 parser (GHSA-px8p-9vwx-vf98), and the session-replay compression worker is rebuilt with
+  it. The SDK only gzips with fflate and never parses ZIP archives, so it was not exposed; the
+  update clears the advisory for scanners that flag the dependency.
+- **The README names the key patterns whose separator is flexible** (`api_key`, `access_key`,
+  `write_key`, `credit_card`, `card_number`). It used to name the wrong five.
+
 ## [2.2.2] — 2026-11-15
 
 ### Fixed

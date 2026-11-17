@@ -1,6 +1,6 @@
 {
   "name": "@groundcover/browser",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "description": "groundcover Real User Monitoring (RUM) SDK for the browser \u2014 performance, errors, logs, distributed tracing and session replay",
   "main": "dist/index.js",
   "module": "dist/index.mjs",

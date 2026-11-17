@@ -4,6 +4,36 @@ All notable changes to `@groundcover/react-native` are documented here. This pro
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.0.1-rc.8] — 2026-11-17
+
+Ninth release candidate. No breaking changes from `0.0.1-rc.7`.
+
+### Fixed
+
+- **A batch the ingest endpoint refuses is no longer silent.** When the endpoint answers 401 or
+  403, the SDK warns on the console once, even with `debug` off, so a wrong `apiKey` or `dsn` no
+  longer looks like a working SDK. Any other non-2xx response is logged with its status when
+  `debug` is on.
+- **Emoji are encoded correctly on engines without `TextEncoder`.** On JSC and on Hermes before
+  RN 0.74, every emoji in a batch (screen names, logs, captured bodies) used to arrive corrupted.
+  The transport now encodes UTF-8 exactly on every engine.
+- **A native crash report survives an `enrichEvent` hook that throws partway.** The hook now gets
+  a copy of the crash event, so one that changes it and then throws no longer ships its half-done
+  changes in place of the report.
+- **`data:` and `blob:` URLs are no longer captured as network requests.** They are read from
+  memory, not the network. A large `data:` URL read with `fetch` was copied into every URL field
+  of its event.
+- **An out-of-range `sessionMaxDuration` in `updateConfig` keeps the current cap.** It used to
+  reset the cap to the 4-hour default, undoing the value chosen at `init`. The warning now names
+  the cap in use, as the Flutter, iOS and Android SDKs already did.
+
+### Changed
+
+- **fflate 0.8.3.** The SDK now depends on fflate 0.8.3, which fixes an infinite loop in fflate's
+  ZIP64 parser (GHSA-px8p-9vwx-vf98). The SDK only gzips with fflate and never parses ZIP
+  archives, so it was not exposed; the update clears the advisory for scanners that flag the
+  dependency.
+
 ## [0.0.1-rc.7] — 2026-11-15
 
 Eighth release candidate. No breaking changes from `0.0.1-rc.6`, and no changes to the SDK's
