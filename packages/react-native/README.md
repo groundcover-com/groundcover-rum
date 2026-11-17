@@ -75,7 +75,7 @@ npx expo install @groundcover/react-native@rc
 | Peer | Version | Required | Purpose |
 |---|---|---|---|
 | `react` | `>= 18.0.0` | ✅ | — |
-| `react-native` | `>= 0.74.0` | ✅ | The supported floor. From 0.74 Hermes also ships the global `TextEncoder` the transport uses to encode emoji correctly; without one, batches are still sent but emoji are mis-encoded. See the [encoding note](#coverage--limitations). |
+| `react-native` | `>= 0.74.0` | ✅ | The supported floor. |
 | `@react-native-async-storage/async-storage` | `>= 1.19.0` | optional | Session continuity across app restarts. See [Session persistence](#session-persistence-asyncstorage). |
 | `@react-navigation/native` | `>= 6.0.0` | optional | Automatic screen tracking via `startNavigationTracking`. |
 
@@ -1095,15 +1095,9 @@ Session replay is not included.
   exist below that; on API 23 the tracker simply does not arm, since a wrong number
   would be worse than none. Every other native feature honours the API 23 floor.
 - **Expo Go** runs every JS feature with zero native setup.
-- **Emoji survive the wire only where the engine has a global `TextEncoder`**
-  — Hermes from RN 0.74. The transport encodes each batch with the compression
-  library's `strToU8`, which uses that global when it exists. Without it — JSC at
-  any version, or an older Hermes — batches are **still sent**, through the
-  library's own encoder, which gets astral-plane characters wrong: `🎉` goes out
-  as `F0 9D AE 89` instead of `F0 9F 8E 89`. Every emoji in a screen name, log
-  line or captured body would arrive corrupted, and nothing would fail loudly to
-  say so. BMP text (accented Latin, Hebrew, CJK) is encoded correctly either way. Network **capture** is unaffected regardless — body
-  sizing uses a separate hand-rolled byte counter that is correct on any engine.
+- **Text is encoded exactly on every engine**, emoji included. The transport uses
+  the engine's `TextEncoder` where it has one (Hermes from RN 0.74) and its own
+  UTF-8 encoder where it doesn't (JSC, older Hermes).
 
 ---
 

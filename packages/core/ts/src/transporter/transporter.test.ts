@@ -14,10 +14,15 @@ vi.mock('../common/logger', () => ({
   }
 }));
 
-vi.mock('fflate', () => ({
-  gzipSync: vi.fn(),
-  strToU8: vi.fn()
-}));
+// strToU8 starts as the real one: common/utf8 checks at load that it encodes
+// exactly, and only then sends every call through it.
+vi.mock('fflate', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fflate')>();
+  return {
+    gzipSync: vi.fn(),
+    strToU8: vi.fn(actual.strToU8)
+  };
+});
 
 // The real encoder, for expected payload bytes (fflate itself is mocked above).
 const { strToU8: realStrToU8 } = await vi.importActual<typeof import('fflate')>('fflate');

@@ -31,8 +31,8 @@ const RESTRICTED = {
   URLSearchParams: "Optional host global — probe with `typeof` before `instanceof`.",
   CompressionStream: "Optional host global — core compresses with fflate instead.",
   Worker: "Browser-only — inject an AsyncEncoder from the platform package.",
-  TextEncoder: "Not universal — encode via fflate's `strToU8` / decode via an injected seam.",
-  TextDecoder: "Not universal — encode via fflate's `strToU8` / decode via an injected seam.",
+  TextEncoder: "Not universal — encode via `encodeUtf8` (src/common/utf8.ts) / decode via an injected seam.",
+  TextDecoder: "Not universal — encode via `encodeUtf8` (src/common/utf8.ts) / decode via an injected seam.",
   process: "Core must not depend on Node.js — it also runs on browsers and Hermes.",
   Buffer: "Core must not depend on Node.js — use Uint8Array.",
 };

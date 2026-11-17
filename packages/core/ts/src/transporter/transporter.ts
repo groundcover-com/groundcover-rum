@@ -2,7 +2,8 @@ import { ConfigManager } from "../config/config-manager";
 import { Batch } from "../events/types";
 import { Logger } from "../common/logger";
 import { safeWarn } from "../common/safe-warn";
-import { gzipSync, strToU8 } from "fflate";
+import { encodeUtf8 } from "../common/utf8";
+import { gzipSync } from "fflate";
 
 export interface EncodedPayload {
   data: Uint8Array;
@@ -20,13 +21,11 @@ export type AsyncEncoder = (
 // The universal, synchronous encode path. Exported so a host's async encoder
 // can reuse it as its own fallback.
 //
-// UTF-8 goes through fflate's `strToU8`, never a bare `TextEncoder`: that
-// global is not present on every host this runs on. `strToU8` uses it when it
-// exists (decided once, at import) and otherwise its own encoder, which is
-// exact for the BMP but mis-encodes surrogate pairs (emoji) — the batch is
-// still sent, never dropped.
+// UTF-8 goes through `encodeUtf8`, never a bare `TextEncoder`: that global is
+// not present on every host this runs on. It is exact either way, emoji
+// included (see common/utf8.ts).
 export function encodeInline(data: string, enableCompression: boolean): EncodedPayload {
-  const byteArray = strToU8(data);
+  const byteArray = encodeUtf8(data);
   if (!enableCompression) {
     return { data: byteArray, isCompressed: false };
   }
