@@ -46,9 +46,9 @@ internal class HttpBatchSender(
             // Read to the end, so the connection can be reused.
             (if (status in 200..299) connection.inputStream else connection.errorStream)
                 ?.use { it.readBytes() }
+            // -1: the answer was not valid HTTP, so there is no status to report.
             return when {
                 status in 200..299 -> SendOutcome.Delivered
-                // -1: the answer was not valid HTTP, so there is no status to report.
                 status > 0 -> SendOutcome.Rejected(status)
                 else -> SendOutcome.Failed
             }
