@@ -1,6 +1,7 @@
 import { ConfigManager } from "../config/config-manager";
 import { Batch } from "../events/types";
 import { Logger } from "../common/logger";
+import { safeWarn } from "../common/safe-warn";
 import { gzipSync, strToU8 } from "fflate";
 
 export interface EncodedPayload {
@@ -50,8 +51,22 @@ export interface BatchRequest {
 // batch reaches the wire; core owns what and when.
 //
 // Fire-and-forget by contract: Transporter never awaits the returned promise,
-// it only attaches a rejection handler, so a slow network can't stall a flush.
+// so a slow network can't stall a flush. It only attaches handlers: a
+// rejection is logged, and a resolved fetch-like response (`{ ok, status }`)
+// that is not 2xx is reported, because fetch resolves rather than rejects on
+// 4xx and 5xx. A sender that resolves with anything else is not inspected.
 export type BatchSender = (endpoint: string, request: BatchRequest) => Promise<unknown>;
+
+// Statuses that mean the endpoint refuses this SDK's credentials. Every batch
+// after one of these is refused the same way, so the app records nothing until
+// the apiKey or dsn is fixed: that warrants a warning outside debug mode.
+const CREDENTIAL_REJECTIONS = new Set([401, 403]);
+
+function rejectedStatus(response: unknown): number | null {
+  if (typeof response !== "object" || response === null) return null;
+  const { ok, status } = response as { ok?: unknown; status?: unknown };
+  return ok === false && typeof status === "number" ? status : null;
+}
 
 export interface TransporterDeps {
   config: ConfigManager;
@@ -64,6 +79,9 @@ export class Transporter {
   private readonly config: ConfigManager;
   private readonly sendBatch: BatchSender;
   private readonly encodeAsync: AsyncEncoder | null;
+  // Credential rejections already warned about: one warning per status is
+  // enough to act on, and a batch goes out every few seconds.
+  private readonly warnedStatuses = new Set<number>();
 
   constructor(deps: TransporterDeps) {
     this.config = deps.config;
@@ -133,9 +151,11 @@ export class Transporter {
         method: "POST",
         headers,
         body: finalData,
-      }).catch(error => {
-        this.logger.log("Network error while sending batch:", error, { groundcoverIgnore: true });
-      });
+      })
+        .then(response => this.reportRejection(response, endpoint))
+        .catch(error => {
+          this.logger.log("Network error while sending batch:", error, { groundcoverIgnore: true });
+        });
     } catch (error) {
       // Optional-chained like the try path above: this handler runs inside an
       // async fn, so a second throw here would surface as an unhandled
@@ -145,6 +165,23 @@ export class Transporter {
           groundcoverIgnore: true,
         });
       }
+    }
+  }
+
+  // A non-2xx means the batch was refused and its events are gone: log it in
+  // debug mode, and warn even without debug when the endpoint refuses the
+  // credentials, since that silently drops every batch.
+  private reportRejection(response: unknown, endpoint: string): void {
+    const status = rejectedStatus(response);
+    if (status === null) return;
+
+    this.logger.log(`Batch rejected by ${endpoint} with HTTP ${status}`, { groundcoverIgnore: true });
+
+    if (CREDENTIAL_REJECTIONS.has(status) && !this.warnedStatuses.has(status)) {
+      this.warnedStatuses.add(status);
+      safeWarn(
+        `[groundcover] ${endpoint} rejected a batch with HTTP ${status}. Check the apiKey and dsn passed to init(): no RUM data is recorded until they are accepted.`
+      );
     }
   }
 
