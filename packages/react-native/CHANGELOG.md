@@ -14,9 +14,6 @@ Ninth release candidate. No breaking changes from `0.0.1-rc.7`.
   403, the SDK warns on the console once, even with `debug` off, so a wrong `apiKey` or `dsn` no
   longer looks like a working SDK. Any other non-2xx response is logged with its status when
   `debug` is on.
-- **Emoji are encoded correctly on engines without `TextEncoder`.** On JSC and on Hermes before
-  RN 0.74, every emoji in a batch (screen names, logs, captured bodies) used to arrive corrupted.
-  The transport now encodes UTF-8 exactly on every engine.
 - **A native crash report survives an `enrichEvent` hook that throws partway.** The hook now gets
   a copy of the crash event, so one that changes it and then throws no longer ships its half-done
   changes in place of the report.

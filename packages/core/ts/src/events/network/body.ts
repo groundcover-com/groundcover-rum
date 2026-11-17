@@ -4,8 +4,6 @@
 // and what a body that can't be kept becomes, lives here so both platforms
 // emit the same placeholders for the same payloads.
 
-import { utf8ByteLength } from "../../common/utf8";
-
 // Emitted in place of a body that redaction can't safely handle (binary,
 // oversized, or partial/slow). A truncated prefix would break redactBody, so a
 // body is either complete or a placeholder — never cut.
@@ -117,5 +115,26 @@ export function capBody(text: string, maxBytes: number, tooLargePlaceholder: str
   return text;
 }
 
-// Lives beside the transport's UTF-8 encoder, which must count the same way.
-export { utf8ByteLength };
+/**
+ * UTF-8 encoded length, identical to `new TextEncoder().encode(text).length`
+ * (which not every host has). A lone surrogate counts as the 3-byte U+FFFD
+ * TextEncoder substitutes for it; only a high+low pair is 4 bytes.
+ */
+export function utf8ByteLength(text: string): number {
+  let bytes = 0;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) {
+      const next = text.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        i++;
+      } else {
+        bytes += 3;
+      }
+    } else bytes += 3;
+  }
+  return bytes;
+}
