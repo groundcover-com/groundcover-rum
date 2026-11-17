@@ -1145,8 +1145,9 @@ namespace (`{ default: AsyncStorage }`), so both `import AsyncStorage from …` 
 ## Session lifecycle
 
 `sessionMaxDuration` sets a **target** maximum wall-clock session length (default
-4 hours / `14400000` ms; must be between 1 minute and 8 hours — out-of-range or
-invalid values fall back to the default with a `console.warn`).
+4 hours / `14400000` ms; must be between 1 minute and 8 hours — an out-of-range or
+invalid value falls back to the default at `init`, and keeps the current cap in
+`updateConfig`, with a `console.warn`).
 
 Rotation is **activity-gated, not timer-driven** — so the cap is not a hard upper
 bound:

@@ -230,18 +230,22 @@ export class SDKConfig {
     this.providedOptions = { ...(input?.options || {}) };
     this.options = mergeOptions(defaults, input?.options || {}, nestedOptions);
     this.options.sessionMaxDuration = SDKConfig.normalizeSessionMaxDuration(
-      input?.options?.sessionMaxDuration
+      input?.options?.sessionMaxDuration,
+      DEFAULT_SESSION_MAX_DURATION_MS
     );
     warnRemovedOptions(input?.options, removedOptions);
     stripRemovedOptions(this.providedOptions, removedOptions);
     stripRemovedOptions(this.options, removedOptions);
   }
 
-  private static normalizeSessionMaxDuration(value: unknown): number {
-    // Only `undefined` (the documented "omit" case) silently uses the default.
+  // `value` when it is a valid cap, else `current`: the default at init, and in
+  // an update the cap the session already runs on, which the app chose and a
+  // bad update shouldn't undo. The Flutter, iOS and Android SDKs do the same.
+  private static normalizeSessionMaxDuration(value: unknown, current: number): number {
+    // Only `undefined` (the documented "omit" case) silently keeps `current`.
     // `null` and every other bad input goes through the warn branch — the
     // public type is `?: number` so anything else is unsupported.
-    if (value === undefined) return DEFAULT_SESSION_MAX_DURATION_MS;
+    if (value === undefined) return current;
     if (
       typeof value !== "number"
       || !Number.isFinite(value)
@@ -249,9 +253,9 @@ export class SDKConfig {
       || value > MAX_SESSION_MAX_DURATION_MS
     ) {
       safeWarn(
-        `[groundcover] sessionMaxDuration must be a finite number between ${MIN_SESSION_MAX_DURATION_MS} ms (1 minute) and ${MAX_SESSION_MAX_DURATION_MS} ms (8 hours); falling back to the 4-hour default`
+        `[groundcover] sessionMaxDuration must be a finite number between ${MIN_SESSION_MAX_DURATION_MS} ms (1 minute) and ${MAX_SESSION_MAX_DURATION_MS} ms (8 hours); using ${Math.round(current / 60_000)} minutes`
       );
-      return DEFAULT_SESSION_MAX_DURATION_MS;
+      return current;
     }
     return value;
   }
@@ -264,6 +268,8 @@ export class SDKConfig {
     if (updates.options) {
       const { nestedOptions, removedOptions } = schemaOf(this);
       warnRemovedOptions(updates.options, removedOptions);
+      // Read before the merge below writes the update's raw value over it.
+      const currentMaxDuration = this.options.sessionMaxDuration;
       // Nested groups merge one level deep so a partial update merges in rather
       // than replacing the whole group — and, for providedOptions, so the
       // explicit-vs-default distinction used by resolvePrivacy survives runtime
@@ -276,7 +282,8 @@ export class SDKConfig {
       this.options = mergeOptions(this.options, updates.options, nestedOptions);
       if (updates.options.sessionMaxDuration !== undefined) {
         this.options.sessionMaxDuration = SDKConfig.normalizeSessionMaxDuration(
-          updates.options.sessionMaxDuration
+          updates.options.sessionMaxDuration,
+          currentMaxDuration ?? DEFAULT_SESSION_MAX_DURATION_MS
         );
       }
       stripRemovedOptions(this.providedOptions, removedOptions);
