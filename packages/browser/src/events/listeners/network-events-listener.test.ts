@@ -351,6 +351,16 @@ describe("NetworkEventsListener", () => {
       expect(listener["shouldIgnoreRequest"]("/api/health")).toBe(false);
     });
 
+    it("ignores data: and blob: URLs by default, so a large data: URL never enters an event", () => {
+      vi.spyOn(configManager, "getConfig").mockReturnValue(createConfigMock());
+      const largeImage = `data:image/png;base64,${"A".repeat(2_000_000)}`;
+
+      expect(listener["shouldIgnoreRequest"](largeImage)).toBe(true);
+      expect(
+        listener["shouldIgnoreRequest"]("blob:http://localhost:3000/5b1e3f0a-6c2d-4f8e-9a1b-7c3d2e1f0a9b")
+      ).toBe(true);
+    });
+
     it("should ignore requests to the getEndpoint URL", () => {
       vi.spyOn(configManager, "getConfig").mockReturnValue(
         createConfigMock([], [])

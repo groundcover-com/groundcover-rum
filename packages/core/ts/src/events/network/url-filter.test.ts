@@ -7,6 +7,17 @@ describe("shouldIgnoreUrl", () => {
     expect(shouldIgnoreUrl("https://api.example/x", { endpoint: "https://ingest.example" })).toBe(false);
   });
 
+  it("ignores data: and blob: URLs, which are read from memory, with no config", () => {
+    expect(shouldIgnoreUrl("data:image/png;base64,iVBORw0KGgo=", {})).toBe(true);
+    expect(shouldIgnoreUrl("DATA:text/plain,hello", {})).toBe(true);
+    expect(shouldIgnoreUrl(" data:text/plain,hello", {})).toBe(true);
+    expect(shouldIgnoreUrl("blob:https://app.example/9f1c2e6a-1d2b-4c1e-9a7f-2b6f0d1e3c4a", {})).toBe(true);
+    // The scheme must lead: the same words in a path or a query are ordinary URLs.
+    expect(shouldIgnoreUrl("https://example.com/data:x", {})).toBe(false);
+    expect(shouldIgnoreUrl("https://example.com/?next=blob:x", {})).toBe(false);
+    expect(shouldIgnoreUrl("/blob/1", {})).toBe(false);
+  });
+
   it("ignores exact excludedUrls matches only", () => {
     const excludedUrls = ["/api/health", "https://example.com/metrics"];
     expect(shouldIgnoreUrl("/api/health", { excludedUrls })).toBe(true);

@@ -129,7 +129,7 @@ groundcover.init({
 | `debug` | `boolean` | `false` | Verbose SDK console logging. |
 | `sessionSampleRate` | `number` | `1` | Fraction of sessions captured (0–1). |
 | `enabledEvents` | `Array<…>` | `[]` | Instrumentations to enable. **Empty = all.** Members: `dom`, `network`, `exceptions`, `logs`, `pageload`, `navigation`, `performance`, `replay`. Note: `replay` still requires an explicit [`startReplayRecording()`](#session-replay) call — it never auto-starts. |
-| `excludedUrls` | `Array<string \| RegExp>` | — | Network requests matching these are not captured. |
+| `excludedUrls` | `Array<string \| RegExp>` | — | Network requests matching these are not captured. `data:` and `blob:` URLs are never captured: they are read from memory, not the network. |
 | `sessionMaxDuration` | `number` | `4h` | Target max session length in ms (1 min – 8 h). See [session lifecycle](#session-lifecycle). |
 | `beforeSend` | `(event) => boolean` | — | Drop gate — return `false` to discard an event. Runs after redaction/enrichment; see [event lifecycle](#architecture). |
 | `enrichEvent` | `(event) => event` | — | Mutate/replace an event before batching. Runs right after `beforeSend`; see [event lifecycle](#architecture). |

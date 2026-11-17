@@ -9,9 +9,20 @@ export interface IgnoreUrlOptions {
   extraIgnore?: (url: string) => boolean;
 }
 
-/** Whether a request is left uncaptured: the SDK's own traffic, or excluded by config. */
+// data: and blob: URLs are read from memory, not the network, so there is no
+// request to trace. A data: URL also carries its whole payload in the URL: an
+// app that fetches a multi-MB image preview through one would have it copied
+// into every URL field of the event, and the page can freeze serializing it.
+// Checked first, before the endpoint and excludedUrls scans read the string.
+const IN_MEMORY_URL = /^\s*(?:data|blob):/i;
+
+/**
+ * Whether a request is left uncaptured: an in-memory data: or blob: URL, the
+ * SDK's own traffic, or excluded by config.
+ */
 export function shouldIgnoreUrl(url: string, options: IgnoreUrlOptions): boolean {
   try {
+    if (IN_MEMORY_URL.test(url)) return true;
     if (options.endpoint && url.includes(options.endpoint)) return true;
     if (options.extraIgnore?.(url)) return true;
 
