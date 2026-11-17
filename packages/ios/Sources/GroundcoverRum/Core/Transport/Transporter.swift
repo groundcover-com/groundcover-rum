@@ -6,28 +6,12 @@ struct BatchRequest {
     var body: Data
 }
 
-/// How a batch POST ended.
-enum SendOutcome: Equatable {
-    /// The ingest answered 2xx.
-    case delivered
-    /// The ingest answered outside 2xx: it refused the batch.
-    case rejected(status: Int)
-    /// No answer: no network, a timeout, or an endpoint that is not a URL.
-    case failed
-
-    var isDelivered: Bool { self == .delivered }
-}
-
 /// The one network primitive the core needs; the platform owns how a batch reaches the wire.
 protocol BatchSender: AnyObject {
-    /// Sends `request`; `completion` says how it ended. Called from any thread.
-    func send(endpoint: String, request: BatchRequest, completion: @escaping (SendOutcome) -> Void)
+    /// Sends `request`; `completion` says whether it was delivered: the request completed with a
+    /// 2xx. Called from any thread.
+    func send(endpoint: String, request: BatchRequest, completion: @escaping (Bool) -> Void)
 }
-
-/// Statuses that mean the endpoint refuses this SDK's credentials. Every batch after one of these
-/// is refused the same way, so the app records nothing until the apiKey or dsn is fixed: that
-/// warrants a warning outside debug.
-private let credentialRejections: Set<Int> = [401, 403]
 
 /// A batch on its way out: the envelope plus the events, as the wire carries them.
 struct Batch {
@@ -42,10 +26,6 @@ final class Transporter {
     private let sender: BatchSender
     private let executor: CoreExecutor
     private let diagnostics: RumDiagnostics
-    // Credential rejections already warned about: one warning per status is enough to act on, and
-    // a batch goes out every few seconds. Completions arrive on the sender's queue, so it's locked.
-    private let warnedLock = NSLock()
-    private var warnedStatuses = Set<Int>()
 
     init(
         config: ConfigManager, sender: BatchSender, executor: CoreExecutor,
@@ -63,9 +43,9 @@ final class Transporter {
             diagnostics.log("No API key found")
             return
         }
-        sender.send(endpoint: outgoing.endpoint, request: outgoing.request) { outcome in
-            if outcome == .failed { self.diagnostics.log("Network error while sending batch") }
-            self.reportRejection(outcome, endpoint: outgoing.endpoint)
+        sender.send(endpoint: outgoing.endpoint, request: outgoing.request) {
+            [diagnostics] delivered in
+            if !delivered { diagnostics.log("Network error while sending batch") }
         }
     }
 
@@ -76,27 +56,10 @@ final class Transporter {
             completion(false)
             return
         }
-        sender.send(endpoint: outgoing.endpoint, request: outgoing.request) { outcome in
-            self.reportRejection(outcome, endpoint: outgoing.endpoint)
-            self.executor.execute { completion(outcome.isDelivered) }
+        sender.send(endpoint: outgoing.endpoint, request: outgoing.request) {
+            [executor] delivered in
+            executor.execute { completion(delivered) }
         }
-    }
-
-    /// A refused batch and its events are gone: logged in debug, and warned about even without
-    /// debug when the endpoint refuses the credentials, since that silently drops every batch. As
-    /// the browser SDK does.
-    private func reportRejection(_ outcome: SendOutcome, endpoint: String) {
-        guard case .rejected(let status) = outcome else { return }
-        diagnostics.log("Batch rejected by \(endpoint) with HTTP \(status)")
-        guard credentialRejections.contains(status) else { return }
-        warnedLock.lock()
-        let first = warnedStatuses.insert(status).inserted
-        warnedLock.unlock()
-        guard first else { return }
-        diagnostics.warn(
-            "[groundcover] \(endpoint) rejected a batch with HTTP \(status). Check the apiKey and "
-                + "dsn passed to Groundcover.start(): no RUM data is recorded until they are "
-                + "accepted.")
     }
 
     private func request(for batch: Batch) -> (endpoint: String, request: BatchRequest)? {

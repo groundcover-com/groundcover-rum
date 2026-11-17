@@ -29,12 +29,18 @@ let backgroundTaskKeepAlive: UploadKeepAlive = {
 final class URLSessionBatchSender: BatchSender {
     private let session: URLSession
     private let keepAlive: UploadKeepAlive
+    private let diagnostics: RumDiagnostics
+    // A 401 or 403 means the ingest refuses the apiKey or dsn, so every batch is dropped until
+    // they're fixed: warned about once, even with debug off. Only touched on the session's queue.
+    private var warnedRefusedKey = false
 
     init(
         configuration: URLSessionConfiguration = .ephemeral,
+        diagnostics: RumDiagnostics = .shared,
         keepAlive: @escaping UploadKeepAlive = { {} }
     ) {
         self.keepAlive = keepAlive
+        self.diagnostics = diagnostics
         configuration.timeoutIntervalForRequest = 30
         configuration.httpMaximumConnectionsPerHost = 2
         let queue = OperationQueue()
@@ -43,10 +49,9 @@ final class URLSessionBatchSender: BatchSender {
         session = URLSession(configuration: configuration, delegate: nil, delegateQueue: queue)
     }
 
-    func send(endpoint: String, request: BatchRequest, completion: @escaping (SendOutcome) -> Void)
-    {
+    func send(endpoint: String, request: BatchRequest, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: endpoint), url.scheme != nil else {
-            completion(.failed)
+            completion(false)
             return
         }
         var urlRequest = URLRequest(url: url)
@@ -57,12 +62,19 @@ final class URLSessionBatchSender: BatchSender {
         urlRequest.httpBody = request.body
         let endKeepAlive = keepAlive()
         session.dataTask(with: urlRequest) { _, response, error in
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
             endKeepAlive()
-            guard error == nil, let status = (response as? HTTPURLResponse)?.statusCode else {
-                completion(.failed)
-                return
-            }
-            completion((200..<300).contains(status) ? .delivered : .rejected(status: status))
+            if error == nil { self.warnIfKeyRefused(status, endpoint: endpoint) }
+            completion(error == nil && (200..<300).contains(status))
         }.resume()
+    }
+
+    private func warnIfKeyRefused(_ status: Int, endpoint: String) {
+        guard status == 401 || status == 403, !warnedRefusedKey else { return }
+        warnedRefusedKey = true
+        diagnostics.warn(
+            "[groundcover] \(endpoint) rejected a batch with HTTP \(status). Check the apiKey and "
+                + "dsn passed to Groundcover.start(): no RUM data is recorded until they are "
+                + "accepted.")
     }
 }

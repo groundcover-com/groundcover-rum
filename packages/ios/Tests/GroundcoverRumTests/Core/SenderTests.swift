@@ -52,7 +52,7 @@ private func aSender() -> URLSessionBatchSender {
 }
 
 private func send(_ sender: URLSessionBatchSender, headers: [String: String] = ["apikey": "k"])
-    async -> SendOutcome
+    async -> Bool
 {
     await withCheckedContinuation { continuation in
         sender.send(
@@ -71,9 +71,9 @@ private func send(_ sender: URLSessionBatchSender, headers: [String: String] = [
     }
 
     @Test func postsTheBodyAndHeadersAndCallsA2xxDelivered() async throws {
-        let outcome = await send(
+        let delivered = await send(
             aSender(), headers: ["apikey": "k", "Content-Type": "application/json"])
-        #expect(outcome == .delivered)
+        #expect(delivered)
         let request = try #require(StubProtocol.seen.first)
         #expect(request.httpMethod == "POST")
         #expect(request.url?.absoluteString == "https://ingest.example/json/rum")
@@ -94,31 +94,53 @@ private func send(_ sender: URLSessionBatchSender, headers: [String: String] = [
             keepAlives.begun += 1
             return { keepAlives.ended += 1 }
         }
-        #expect(await send(sender) == .delivered)
+        #expect(await send(sender))
         #expect(keepAlives.begun == 1)
         #expect(keepAlives.ended == 1)
         StubProtocol.fails = true
-        #expect(await send(sender) == .failed)
+        #expect(await send(sender) == false)
         #expect(keepAlives.begun == 2)
         #expect(keepAlives.ended == 2)
     }
 
-    @Test func aNon2xxAnswerIsRejectedWithItsStatus() async {
-        StubProtocol.status = 401
-        #expect(await send(aSender()) == .rejected(status: 401))
+    @Test func aNon2xxAnswerIsNotDelivered() async {
+        StubProtocol.status = 500
+        #expect(await send(aSender()) == false)
     }
 
-    @Test func aNetworkFailureFails() async {
+    @Test func aRefusedKeyWarnsOnceWithDebugOff() async {
+        final class Lines: @unchecked Sendable {
+            var all: [String] = []
+        }
+        let lines = Lines()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubProtocol.self]
+        let sender = URLSessionBatchSender(
+            configuration: configuration,
+            diagnostics: RumDiagnostics(sink: { lines.all.append($0) }))
+        for status in [401, 403, 401, 500] {
+            StubProtocol.status = status
+            #expect(await send(sender) == false)
+        }
+        #expect(
+            lines.all == [
+                "[groundcover] https://ingest.example/json/rum rejected a batch with HTTP 401. "
+                    + "Check the apiKey and dsn passed to Groundcover.start(): no RUM data is "
+                    + "recorded until they are accepted."
+            ])
+    }
+
+    @Test func aNetworkFailureIsNotDelivered() async {
         StubProtocol.fails = true
-        #expect(await send(aSender()) == .failed)
+        #expect(await send(aSender()) == false)
     }
 
-    @Test func anEndpointThatIsNotAUrlFails() async {
-        let outcome = await withCheckedContinuation { continuation in
+    @Test func anEndpointThatIsNotAUrlIsNotDelivered() async {
+        let delivered = await withCheckedContinuation { continuation in
             aSender().send(endpoint: "", request: BatchRequest(headers: [:], body: Data())) {
                 continuation.resume(returning: $0)
             }
         }
-        #expect(outcome == .failed)
+        #expect(!delivered)
     }
 }
