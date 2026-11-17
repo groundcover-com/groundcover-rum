@@ -1,0 +1,2 @@
+### Fixed
+- **Flutter, iOS and Android — a batch the ingest endpoint refuses is no longer silent.** When the endpoint answers 401 or 403, the SDK warns once, even with `debug` off, so a wrong `apiKey` or `dsn` no longer looks like a working SDK. Any other non-2xx response is logged with its status when `debug` is on, instead of as a network error. The browser and React Native SDKs do the same from 2.2.3 and 0.0.1-rc.8.
