@@ -11,8 +11,6 @@ import com.groundcover.rum.core.nativeengine.NativeEngine
 import com.groundcover.rum.core.nativeengine.NativeEngineStatus
 import com.groundcover.rum.core.transport.BatchRequest
 import com.groundcover.rum.core.transport.BatchSender
-import com.groundcover.rum.core.transport.SendOutcome
-import com.groundcover.rum.core.transport.isDelivered
 import java.io.ByteArrayInputStream
 import java.util.zip.GZIPInputStream
 
@@ -68,16 +66,7 @@ internal class SentRequest(val url: String, val headers: Map<String, String>, va
 /** A sender that records every request instead of sending it. */
 internal class RecordingSender : BatchSender {
     val requests = mutableListOf<SentRequest>()
-
-    /** How every send ends. */
-    var outcome: SendOutcome = SendOutcome.Delivered
-
-    /** Shorthand for [outcome]: delivered, or failed without an answer. */
-    var delivers: Boolean
-        get() = outcome.isDelivered
-        set(value) {
-            outcome = if (value) SendOutcome.Delivered else SendOutcome.Failed
-        }
+    var delivers = true
 
     /** Runs as a request is handed over, before it completes. */
     var onSend: (() -> Unit)? = null
@@ -86,11 +75,11 @@ internal class RecordingSender : BatchSender {
     var holdsCompletions = false
     private val held = mutableListOf<() -> Unit>()
 
-    override fun send(endpoint: String, request: BatchRequest, completion: (SendOutcome) -> Unit) {
+    override fun send(endpoint: String, request: BatchRequest, completion: (Boolean) -> Unit) {
         requests.add(SentRequest(endpoint, request.headers, request.body))
         onSend?.invoke()
-        val result = outcome
-        if (holdsCompletions) held.add { completion(result) } else completion(result)
+        val delivered = delivers
+        if (holdsCompletions) held.add { completion(delivered) } else completion(delivered)
     }
 
     fun releaseCompletions() {

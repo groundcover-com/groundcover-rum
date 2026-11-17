@@ -152,59 +152,6 @@ class TransporterTest {
         assertEquals(listOf(true, false, false), verdicts)
         assertEquals("nothing is sent without an API key", 2, platform.requests.size)
     }
-
-    // A refused batch, as the browser SDK reports it: a 401 or 403 warns once per status even with
-    // debug off, since a refused key silently drops every batch; any other status is only logged
-    // in debug.
-    @Test
-    fun aRefusedKeyWarnsOncePerStatusWithDebugOff() {
-        val lines = mutableListOf<String>()
-        val platform = FakePlatform()
-        val diagnostics = RumDiagnostics(sink = { lines.add(it) })
-        val transporter = aTransporter(aConfig(), platform, diagnostics)
-        platform.sender.outcome = SendOutcome.Rejected(401)
-        transporter.send(aBatch())
-        transporter.send(aBatch())
-        platform.sender.outcome = SendOutcome.Rejected(403)
-        transporter.send(aBatch())
-        assertEquals(
-            listOf(401, 403).map {
-                "[groundcover] https://ingest.example/json/rum rejected a batch with HTTP $it. " +
-                    "Check the apiKey and dsn passed to Groundcover.start(): no RUM data is " +
-                    "recorded until they are accepted."
-            },
-            lines
-        )
-    }
-
-    @Test
-    fun anotherRefusalIsOnlyLoggedInDebug() {
-        val lines = mutableListOf<String>()
-        val diagnostics = RumDiagnostics(sink = { lines.add(it) })
-        val platform = FakePlatform()
-        platform.sender.outcome = SendOutcome.Rejected(500)
-        aTransporter(aConfig(), platform, diagnostics).send(aBatch())
-        assertEquals(emptyList<String>(), lines)
-
-        diagnostics.configure(debug = true)
-        aTransporter(aConfig(debug = true), platform, diagnostics).send(aBatch())
-        val rejected = "Batch rejected by https://ingest.example/json/rum with HTTP 500"
-        assertTrue(lines.any { it.endsWith(rejected) })
-        assertTrue(lines.none { it.contains("rejected a batch") })
-    }
-
-    @Test
-    fun aRefusedDeliveryWarnsAndIsNotDelivered() {
-        val verdicts = mutableListOf<Boolean>()
-        val lines = mutableListOf<String>()
-        val platform = FakePlatform()
-        platform.sender.outcome = SendOutcome.Rejected(401)
-        aTransporter(aConfig(), platform, RumDiagnostics(sink = { lines.add(it) }))
-            .deliver(aBatch()) { verdicts.add(it) }
-        assertEquals(listOf(false), verdicts)
-        assertEquals(1, lines.size)
-        assertTrue(lines.single().contains("HTTP 401"))
-    }
 }
 
 class GzipTest {

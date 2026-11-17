@@ -7,7 +7,6 @@ import com.groundcover.rum.core.config.DEFAULT_COMPRESSION
 import com.groundcover.rum.core.pipeline.CoreExecutor
 import java.io.ByteArrayOutputStream
 import java.io.IOException
-import java.util.Collections
 import java.util.zip.GZIPOutputStream
 
 /** One batch POST, as the platform sends it. */
@@ -15,35 +14,13 @@ internal class BatchRequest(val headers: Map<String, String>, val body: ByteArra
     val method = "POST"
 }
 
-/** How a batch POST ended. */
-internal sealed interface SendOutcome {
-    /** The ingest answered 2xx. */
-    object Delivered : SendOutcome
-
-    /** The ingest answered outside 2xx: it refused the batch. */
-    data class Rejected(val status: Int) : SendOutcome
-
-    /** No answer: no network, a timeout, or an endpoint that is not a URL. */
-    object Failed : SendOutcome
-}
-
-internal val SendOutcome.isDelivered: Boolean
-    get() = this == SendOutcome.Delivered
-
 /**
  * The one network primitive the core needs; the platform owns how a batch reaches the wire.
- * [completion] reports how the request ended. Called from any thread.
+ * [completion] reports whether the batch was delivered: the request completed with a 2xx.
  */
 internal fun interface BatchSender {
-    fun send(endpoint: String, request: BatchRequest, completion: (SendOutcome) -> Unit)
+    fun send(endpoint: String, request: BatchRequest, completion: (Boolean) -> Unit)
 }
-
-/**
- * Statuses that mean the endpoint refuses this SDK's credentials. Every batch after one of these
- * is refused the same way, so the app records nothing until the apiKey or dsn is fixed: that
- * warrants a warning outside debug.
- */
-private val CREDENTIAL_REJECTIONS = setOf(401, 403)
 
 /** A batch on its way out: the envelope plus the events. */
 internal class Batch(val sessionAttributes: Map<String, Any?>, val events: List<Map<String, Any?>>)
@@ -68,28 +45,6 @@ internal class Transporter(
     private val executor: CoreExecutor,
     private val diagnostics: RumDiagnostics = RumDiagnostics.shared
 ) {
-    // Credential rejections already warned about: one warning per status is enough to act on, and
-    // a batch goes out every few seconds. Completions arrive on the sender's thread.
-    private val warnedStatuses: MutableSet<Int> = Collections.synchronizedSet(HashSet())
-
-    /**
-     * A refused batch and its events are gone: logged in debug, and warned about even without
-     * debug when the endpoint refuses the credentials, since that silently drops every batch. As
-     * the browser SDK does.
-     */
-    private fun reportRejection(outcome: SendOutcome, endpoint: String) {
-        if (outcome !is SendOutcome.Rejected) return
-        val status = outcome.status
-        diagnostics.log("Batch rejected by $endpoint with HTTP $status")
-        if (status in CREDENTIAL_REJECTIONS && warnedStatuses.add(status)) {
-            diagnostics.warn(
-                "[groundcover] $endpoint rejected a batch with HTTP $status. Check the apiKey " +
-                    "and dsn passed to Groundcover.start(): no RUM data is recorded until they " +
-                    "are accepted."
-            )
-        }
-    }
-
     /** [batch] as the request that carries it; null without an API key, when nothing is sent. */
     private fun request(batch: Batch): Pair<String, BatchRequest>? {
         val config = config.config
@@ -119,11 +74,8 @@ internal class Transporter(
                 diagnostics.log("No API key found")
                 return
             }
-            sender.send(endpoint, request) { outcome ->
-                if (outcome == SendOutcome.Failed) {
-                    diagnostics.log("Network error while sending batch")
-                }
-                reportRejection(outcome, endpoint)
+            sender.send(endpoint, request) { delivered ->
+                if (!delivered) diagnostics.log("Network error while sending batch")
             }
         } catch (error: Exception) {
             diagnostics.log("Failed to send batch:", error)
@@ -146,9 +98,8 @@ internal class Transporter(
             return
         }
         try {
-            sender.send(outgoing.first, outgoing.second) { outcome ->
-                reportRejection(outcome, outgoing.first)
-                executor.execute { completion(outcome.isDelivered) }
+            sender.send(outgoing.first, outgoing.second) { delivered ->
+                executor.execute { completion(delivered) }
             }
         } catch (error: Exception) {
             diagnostics.log("Failed to deliver batch:", error)
