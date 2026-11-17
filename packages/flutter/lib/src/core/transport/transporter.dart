@@ -22,22 +22,6 @@ final class BatchRequest {
 typedef BatchSender =
     Future<void> Function(String endpoint, BatchRequest request);
 
-/// What a [BatchSender] throws when the ingest answers outside 2xx, so the
-/// transporter can tell a refused batch from a network failure.
-final class IngestRejected implements Exception {
-  const IngestRejected(this.status);
-
-  final int status;
-
-  @override
-  String toString() => 'the ingest answered $status';
-}
-
-/// Statuses that mean the endpoint refuses this SDK's credentials. Every batch
-/// after one of these is refused the same way, so the app records nothing
-/// until the apiKey or dsn is fixed: that warrants a warning outside debug.
-const _credentialRejections = {401, 403};
-
 /// What the core can't do itself, so the platform provides it: gzip (it is
 /// dart:io's), and a batch's body built off the UI isolate (dart:isolate's).
 abstract interface class Compressor {
@@ -70,26 +54,6 @@ final class Transporter {
   final ConfigManager _config;
   final BatchSender _sendBatch;
   final Compressor? _compressor;
-
-  /// Credential rejections already warned about: one warning per status is
-  /// enough to act on, and a batch goes out every few seconds.
-  final _warnedStatuses = <int>{};
-
-  /// A refused batch and its events are gone: logged in debug, and warned
-  /// about even without debug when the endpoint refuses the credentials,
-  /// since that silently drops every batch. As the browser SDK does.
-  void _reportRejection(int status, String endpoint) {
-    RumDiagnostics.instance.log(
-      'Batch rejected by $endpoint with HTTP $status',
-    );
-    if (_credentialRejections.contains(status) && _warnedStatuses.add(status)) {
-      safeWarn(
-        '[groundcover] $endpoint rejected a batch with HTTP $status. Check '
-        'the apiKey and dsn passed to GroundcoverRum.init(): no RUM data is '
-        'recorded until they are accepted.',
-      );
-    }
-  }
 
   /// [payload] as a request body. The platform builds it off the UI isolate,
   /// JSON, UTF-8 and gzip alike: since Flutter 3.29 the UI isolate is the
@@ -162,21 +126,15 @@ final class Transporter {
   /// be; the crash drain needs the verdict, to delete a record only once it
   /// landed. False without an API key, when nothing is sent.
   Future<bool> deliver(Batch batch) async {
-    String? endpoint;
     try {
       // Not a lifecycle send: nothing is being suspended, so its body, large
       // as a crash record can be, is built off the UI isolate.
       final outgoing = await _request(batch, lifecycle: false);
       if (outgoing == null) return false;
-      endpoint = outgoing.endpoint;
       await _sendBatch(outgoing.endpoint, outgoing.request);
       return true;
     } catch (error) {
-      if (error is IngestRejected && endpoint != null) {
-        _reportRejection(error.status, endpoint);
-      } else {
-        RumDiagnostics.instance.log('Failed to deliver batch:', error);
-      }
+      RumDiagnostics.instance.log('Failed to deliver batch:', error);
       return false;
     }
   }
@@ -192,10 +150,6 @@ final class Transporter {
         _sendBatch(outgoing.endpoint, outgoing.request).catchError((
           Object error,
         ) {
-          if (error is IngestRejected) {
-            _reportRejection(error.status, outgoing.endpoint);
-            return;
-          }
           RumDiagnostics.instance.log(
             'Network error while sending batch:',
             error,

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:isolate';
 
 import '../core/common/json.dart';
+import '../core/common/logger.dart';
 import '../core/transport/transporter.dart';
 
 /// Sends a batch over dart:io. dart:io traffic is subject to neither
@@ -32,6 +33,10 @@ final class HttpBatchSender {
 
   final Duration timeout;
   final HttpClient _client;
+
+  /// A 401 or 403 means the ingest refuses the apiKey or dsn, so every batch
+  /// is dropped until they're fixed: warned about once, even with debug off.
+  var _warnedRefusedKey = false;
 
   /// Sends [batch], stopping the request at [timeout] as RN's
   /// AbortController does: a hung ingest must not hold a socket per batch.
@@ -68,10 +73,19 @@ final class HttpBatchSender {
       final response = await open.close();
       // Read to the end, so the connection can be reused.
       await (body = response.listen(null)).asFuture<void>();
-      // Not delivered: the transporter reports it, and the crash drain keeps
+      // Not delivered: the live path only logs it, and the crash drain keeps
       // the record for the next launch.
-      if (response.statusCode < 200 || response.statusCode > 299) {
-        throw IngestRejected(response.statusCode);
+      final status = response.statusCode;
+      if (status < 200 || status > 299) {
+        if ((status == 401 || status == 403) && !_warnedRefusedKey) {
+          _warnedRefusedKey = true;
+          safeWarn(
+            '[groundcover] $endpoint rejected a batch with HTTP $status. Check '
+            'the apiKey and dsn passed to GroundcoverRum.init(): no RUM data is '
+            'recorded until they are accepted.',
+          );
+        }
+        throw HttpException('the ingest answered $status');
       }
     }
 
