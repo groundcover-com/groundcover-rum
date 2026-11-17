@@ -51,7 +51,7 @@ for the product guide; this README is the Flutter SDK's documentation.
 ## Install
 
 ```bash
-flutter pub add groundcover_rum:0.0.1-rc.3
+flutter pub add groundcover_rum:0.0.1-rc.4
 ```
 
 The native side is a regular Flutter plugin. iOS builds it through Swift Package Manager or

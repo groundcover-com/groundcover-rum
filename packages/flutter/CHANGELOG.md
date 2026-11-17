@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.0.1-rc.4
+
+The fifth release candidate. No breaking changes from `0.0.1-rc.3`.
+
+### Fixed
+
+- **A refused API key is no longer silent.** When the ingest endpoint answers 401 or 403, the SDK
+  warns once, even with `debug` off, so a wrong `apiKey` or `dsn` no longer looks like a working
+  SDK.
+
 ## 0.0.1-rc.3
 
 The fourth release candidate. No breaking changes from `0.0.1-rc.2`, and no changes to the SDK's
