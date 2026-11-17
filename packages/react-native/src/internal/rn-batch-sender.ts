@@ -19,7 +19,7 @@ export const RN_SEND_TIMEOUT_MS = 30_000;
  * @param onOutcome Called at most once per request with whether the server ACCEPTED it — a
  *   resolved 2xx is `true`; a non-2xx, a network rejection, or a synchronous `fetch` throw is
  *   `false`. Omit it for the live path, which is fire-and-forget: the {@link Transporter} never
- *   awaits the returned promise and never retries, it only reports a non-2xx response.
+ *   awaits the returned promise and never retries; it only warns on a 401 or 403.
  */
 export function createRnBatchSender(onOutcome?: (delivered: boolean) => void): BatchSender {
   return (endpoint, request) => {

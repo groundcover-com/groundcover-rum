@@ -203,7 +203,7 @@ describe('Transporter', () => {
 
     // fetch resolves, not rejects, on 4xx and 5xx: before this was read, an
     // endpoint that refused every batch looked exactly like one that took them.
-    describe('a resolved response that is not 2xx', () => {
+    describe('an endpoint that refuses the key', () => {
       const ENDPOINT = 'https://test-endpoint.com/json/rum';
       let warnSpy: ReturnType<typeof vi.spyOn>;
 
@@ -222,43 +222,24 @@ describe('Transporter', () => {
         await new Promise(resolve => setTimeout(resolve, 0));
       };
 
-      it('logs the status and endpoint in debug, without a console warning', async () => {
-        await sendAndSettle({ ok: false, status: 500 });
-
-        expect(mockLogger.log).toHaveBeenCalledWith(
-          `Batch rejected by ${ENDPOINT} with HTTP 500`,
-          { groundcoverIgnore: true }
-        );
-        expect(warnSpy).not.toHaveBeenCalled();
-      });
-
-      it.each([401, 403])('warns once without debug when the endpoint refuses the credentials (%i)', async (status) => {
-        await sendAndSettle({ ok: false, status });
-        await sendAndSettle({ ok: false, status });
+      it('warns once, without debug, on a 401 or 403', async () => {
+        await sendAndSettle({ ok: false, status: 401 });
+        await sendAndSettle({ ok: false, status: 403 });
+        await sendAndSettle({ ok: false, status: 401 });
 
         expect(warnSpy).toHaveBeenCalledTimes(1);
         const message = String(warnSpy.mock.calls[0]?.[0]);
-        expect(message).toContain(`${ENDPOINT} rejected a batch with HTTP ${status}`);
+        expect(message).toContain(`${ENDPOINT} rejected a batch with HTTP 401`);
         expect(message).toContain('apiKey');
         // The SDK's own console capture skips messages carrying this marker.
         expect(message).toContain('groundcoverIgnore');
       });
 
-      it('warns separately for 401 and 403', async () => {
-        await sendAndSettle({ ok: false, status: 401 });
-        await sendAndSettle({ ok: false, status: 403 });
-
-        expect(warnSpy).toHaveBeenCalledTimes(2);
-      });
-
-      it('reports nothing for a 2xx, or for a sender that resolves with no response', async () => {
+      it('says nothing for any other answer', async () => {
         await sendAndSettle({ ok: true, status: 202 });
+        await sendAndSettle({ ok: false, status: 500 });
         await sendAndSettle(undefined);
 
-        expect(mockLogger.log).not.toHaveBeenCalledWith(
-          expect.stringContaining('Batch rejected'),
-          expect.anything()
-        );
         expect(warnSpy).not.toHaveBeenCalled();
       });
     });

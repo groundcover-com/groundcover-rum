@@ -8,10 +8,9 @@ All notable changes to `@groundcover/browser` are documented here. This project 
 
 ### Fixed
 
-- **A batch the ingest endpoint refuses is no longer silent.** When the endpoint answers 401 or
-  403, the SDK warns on the console once, even with `debug` off, so a wrong `apiKey` or `dsn` no
-  longer looks like a working SDK. Any other non-2xx response is logged with its status when
-  `debug` is on.
+- **A refused API key is no longer silent.** When the ingest endpoint answers 401 or 403, the SDK
+  warns on the console once, even with `debug` off, so a wrong `apiKey` or `dsn` no longer looks
+  like a working SDK.
 - **`data:` and `blob:` URLs are no longer captured as network requests.** They are read from
   memory, not the network. A large `data:` URL, such as an image preview the page reads with
   `fetch`, was copied into every URL field of its event.
