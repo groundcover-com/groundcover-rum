@@ -56,6 +56,29 @@ export type BaseEvent<TType extends string = string> = {
   attributes?: Record<string, unknown>;
 };
 
+/**
+ * How an event merges with its identical repeats in a batch
+ * (errors.deduplication): what the event's producer says makes two of them the
+ * same, plus where it happened (see EventEnricher).
+ */
+export type DedupInfo = {
+  /** Equal keys are repeats of one another. */
+  key: number;
+  /** The attribute a merged event carries its count in. */
+  countAttribute: string;
+};
+
+/**
+ * An event that can merge with its identical repeats: one whose producer gave
+ * it `dedup` (exceptions, error-level logs; never hangs or crashes). The
+ * enricher sets `dedup` as a hidden, frozen property: never serialized, not
+ * seen when a hook logs or spreads the event, and not changed by one. The pool
+ * reads it before the hooks run, so a hook can't change how the event groups.
+ */
+export interface DedupeableEvent<TType extends string = string> extends BaseEvent<TType> {
+  dedup?: DedupInfo;
+}
+
 export type UserIdentifiers = {
   id: string;
   email: string;
@@ -142,6 +165,14 @@ export type ErrorEventAttributes = {
   error_fingerprint: string;
   error_handled: boolean;
   error_metadata?: Record<string, unknown>;
+  /**
+   * How many occurrences this event stands for, itself included, when repeats
+   * in the same batch were merged into it (errors.deduplication). Absent means
+   * one; the true count of an error is the sum of this (or 1) over its events.
+   * Set on a copy when the batch is sent, so `beforeSend` and `enrichEvent`
+   * never see it: they see every occurrence instead.
+   */
+  error_repeat_count?: number;
 };
 
 export const LOG_LEVELS = ["log", "info", "warn", "error", "debug", "trace"] as const;
@@ -150,6 +181,11 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
 export type LogEventAttributes = {
   message: string;
   level: string;
+  /**
+   * On an error-level log: how many occurrences it stands for, like an
+   * exception's `error_repeat_count` (errors.deduplication). Absent means one.
+   */
+  log_repeat_count?: number;
 } & Record<string, unknown>;
 
 export type UserDefinedEventAttributes = {

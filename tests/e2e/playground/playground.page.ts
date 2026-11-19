@@ -53,6 +53,11 @@ export default class PlaygroundPage {
     await this.page.getByText('Throw Error').click();
   }
 
+  // Throws the same uncaught error ERROR_LOOP_COUNT times (see App.tsx).
+  async triggerErrorLoop() {
+    await this.page.getByRole('button', { name: 'Error Loop' }).click();
+  }
+
   async navigate() {
     await this.page.getByText('Navigate').click();
   }

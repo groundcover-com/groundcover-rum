@@ -4,6 +4,30 @@ All notable changes to `@groundcover/react-native` are documented here. This pro
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.0.1-rc.9] — 2026-11-19
+
+Tenth release candidate. No breaking changes from `0.0.1-rc.8`; repeated identical errors are now
+merged by default, see Changed.
+
+### Added
+
+- **`options.errors.deduplication`.** Controls the merging of repeated errors below. On by default;
+  `{ enabled: false }`, or `false` for short, sends every occurrence.
+
+### Changed
+
+- **Repeated identical errors are merged.** An error loop used to send every occurrence, so one
+  failing call could send thousands of identical exceptions in minutes. Now a repeat of an exception
+  or error-level log that is still waiting in the current batch is counted on that event instead of
+  sent again, so each batch carries one event per distinct error, with `error_repeat_count`
+  (exceptions) or `log_repeat_count` (logs) set to the occurrences it stands for. Repeats are the
+  same error when they happen on the same screen and, for exceptions, are thrown through the same
+  code path (the same stack). A merged event keeps the first occurrence's context: timestamp, ids
+  and metadata. A batch is still sent once an error reaches `transport.batchSize` occurrences.
+  Events without the field stand for one, so the total is the sum of the field; exception and
+  error-log counts that count events rather than summing it will read lower. Native crashes and app
+  hangs are never merged.
+
 ## [0.0.1-rc.8] — 2026-11-17
 
 Ninth release candidate. No breaking changes from `0.0.1-rc.7`.

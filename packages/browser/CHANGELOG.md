@@ -4,6 +4,29 @@ All notable changes to `@groundcover/browser` are documented here. This project 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [2.3.0-rc.0] — 2026-11-19
+
+Release candidate for `2.3.0`, published under the `rc` tag. Repeated identical errors are now
+merged by default; see Changed.
+
+### Added
+
+- **`options.errors.deduplication`.** Controls the merging of repeated errors below. On by default;
+  `{ enabled: false }`, or `false` for short, sends every occurrence.
+
+### Changed
+
+- **Repeated identical errors are merged.** An error loop used to send every occurrence, so one
+  failing call could send thousands of identical exceptions in minutes. Now a repeat of an exception
+  or error-level log that is still waiting in the current batch is counted on that event instead of
+  sent again, so each batch carries one event per distinct error, with `error_repeat_count`
+  (exceptions) or `log_repeat_count` (logs) set to the occurrences it stands for. Repeats are the
+  same error when they happen on the same page and, for exceptions, are thrown through the same code
+  path (the same stack). A merged event keeps the first occurrence's context: timestamp, ids and
+  metadata. A batch is still sent once an error reaches `transport.batchSize` occurrences. Events
+  without the field stand for one, so the total is the sum of the field; exception and error-log
+  counts that count events rather than summing it will read lower.
+
 ## [2.2.3] — 2026-11-17
 
 ### Fixed

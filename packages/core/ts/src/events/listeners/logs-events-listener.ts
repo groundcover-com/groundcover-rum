@@ -3,6 +3,7 @@ import { BaseListener } from "./base-listener";
 import { handleError } from "../../common/error-handler";
 import { truncate } from "../../common/text";
 import { redactLogFields } from "../../privacy/redaction";
+import { errorLogDedup } from "../logs/log-dedup";
 
 const levels = ["log", "info", "warn", "error", "debug", "assert", "trace"] as const;
 type ConsoleLevel = (typeof levels)[number];
@@ -146,13 +147,15 @@ export class LogEventsListener<TExtra extends string = string> extends BaseListe
       attributes
     );
 
+    const text = truncate({ text: safeMessage });
     return this.enricher.enrich({
       type: "log",
       attributes: {
         ...safeAttributes,
-        message: truncate({ text: safeMessage }),
+        message: text,
         level,
       },
+      dedup: errorLogDedup(text, level),
     });
   }
 

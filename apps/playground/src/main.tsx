@@ -32,7 +32,7 @@ const DEFAULT_PRIVACY = {
 // option groups merge one level deep, so a partial override (e.g. only
 // `transport.batchSize`) doesn't wipe sibling defaults like
 // `transport.compression`. Top-level scalars/arrays replace wholesale.
-const NESTED_OPTION_KEYS = ["transport", "privacy", "tracing", "replay"] as const;
+const NESTED_OPTION_KEYS = ["transport", "privacy", "tracing", "replay", "errors"] as const;
 function mergeOptions(
   base: Record<string, unknown>,
   override: Record<string, unknown>
@@ -47,9 +47,9 @@ function mergeOptions(
   return merged;
 }
 
-// E2E hook: `?gcp=<base64 JSON>` overrides the privacy options so each spec can
-// boot the SDK with a specific config. Shape:
-//   { privacy?: {..., redactorName?: keyof REDACTORS} }
+// E2E hook: `?gcp=<base64 JSON>` overrides the options so each spec can boot the
+// SDK with a specific config. Shape:
+//   { privacy?: {..., redactorName?: keyof REDACTORS}, errors?: {...}, ... }
 // Without the param, the default config above is used (existing specs rely on it).
 function buildOptions() {
   const raw = new URLSearchParams(window.location.search).get("gcp");

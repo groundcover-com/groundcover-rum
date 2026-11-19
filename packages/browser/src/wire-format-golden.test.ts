@@ -54,6 +54,16 @@ function simulatePresence(): void {
   window.dispatchEvent(new Event("pointerdown"));
 }
 
+// The tab is hidden: the SDK's lifecycle flush. showPage undoes it.
+function hidePage(): void {
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+  document.dispatchEvent(new Event("visibilitychange"));
+}
+
+function showPage(): void {
+  delete (document as { visibilityState?: unknown }).visibilityState;
+}
+
 describe("wire-format golden contract", () => {
   let fetchMock: ReturnType<typeof vi.fn>;
   let manager: SessionManager | null = null;
@@ -554,6 +564,32 @@ describe("wire-format golden contract", () => {
     it("exception-event.json", async () => {
       const sent = await onlyRequest((sdk) => sdk.captureException(new Error("golden failure"), { stage: "test" }));
       expect(sent).toEqual(fixture("exception-event.json"));
+    });
+
+    it("exception-repeat-event.json", async () => {
+      // batchSize 10, so the three calls share one batch.
+      const batched = {
+        ...BASE_CONFIG,
+        options: { ...BASE_CONFIG.options, transport: { ...BASE_CONFIG.options?.transport, batchSize: 10 } },
+      } as SDKConfigInput;
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXTURE_CLOCK_MS);
+      try {
+        const sdk = initSDK(batched);
+        simulatePresence();
+        // One call site, so all three are the same error.
+        for (const offsetMs of [0, 1_000, 2_000]) {
+          nowSpy.mockReturnValue(FIXTURE_CLOCK_MS + offsetMs);
+          sdk.captureException(new Error("golden failure"), { stage: "test" });
+        }
+        hidePage();
+        await drainAsyncSends();
+      } finally {
+        nowSpy.mockRestore();
+        showPage();
+      }
+      const calls = recordedCalls(fetchMock);
+      expect(calls).toHaveLength(1);
+      expect(sharedRequest(calls[0]!)).toEqual(fixture("exception-repeat-event.json"));
     });
   });
 });
