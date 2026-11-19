@@ -18,6 +18,17 @@ describe("shouldIgnoreUrl", () => {
     expect(shouldIgnoreUrl("/blob/1", {})).toBe(false);
   });
 
+  it("reads the scheme as the URL parser does", () => {
+    // Stripped or dropped by the parser, so these are still data: and blob: URLs.
+    expect(shouldIgnoreUrl("\tdata:text/plain,hello", {})).toBe(true);
+    expect(shouldIgnoreUrl("\u0001 blob:https://app.example/1", {})).toBe(true);
+    expect(shouldIgnoreUrl("da\nt\ra:text/plain,hello", {})).toBe(true);
+    // Not stripped: each is a relative path the browser requests over HTTP.
+    expect(shouldIgnoreUrl("\u00a0data:release-notes", {})).toBe(false);
+    expect(shouldIgnoreUrl("\ufeffdata:release-notes", {})).toBe(false);
+    expect(shouldIgnoreUrl("\u3000blob:release-notes", {})).toBe(false);
+  });
+
   it("ignores exact excludedUrls matches only", () => {
     const excludedUrls = ["/api/health", "https://example.com/metrics"];
     expect(shouldIgnoreUrl("/api/health", { excludedUrls })).toBe(true);
