@@ -131,10 +131,11 @@ describe("SDKConfig", () => {
       const a = new SDKConfig({ ...CREDS });
       const b = new SDKConfig({ ...CREDS });
 
-      for (const key of ["transport", "tracing", "privacy"] as const) {
+      for (const key of ["transport", "tracing", "privacy", "errors"] as const) {
         expect(a.options[key]).toEqual(b.options[key]);
         expect(a.options[key]).not.toBe(b.options[key]);
       }
+      expect(a.options.errors?.deduplication).not.toBe(b.options.errors?.deduplication);
     });
 
     it("does not alias the module-level defaults", () => {
@@ -144,6 +145,9 @@ describe("SDKConfig", () => {
       expect(config.options.tracing).not.toBe(DEFAULT_SDK_CONFIG_OPTIONS.tracing);
       expect(config.options.tracing?.origin).not.toBe(
         DEFAULT_SDK_CONFIG_OPTIONS.tracing?.origin
+      );
+      expect(config.options.errors?.deduplication).not.toBe(
+        DEFAULT_SDK_CONFIG_OPTIONS.errors?.deduplication
       );
     });
 
@@ -371,6 +375,71 @@ describe("SDKConfig", () => {
       config.updateConfig({ options: { tracing: { origin: null } } as never });
 
       expect(config.options.tracing?.origin).toEqual({ name: "n", value: "v" });
+    });
+  });
+
+  describe("errors.deduplication", () => {
+    let warnSpy: ReturnType<typeof vi.spyOn>;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    // The stored setting is always the object form; the shorthand is expanded.
+    const enabled = (config: SDKConfig) =>
+      (config.options.errors?.deduplication as { enabled?: unknown } | undefined)?.enabled;
+
+    it("is on by default", () => {
+      expect(new SDKConfig(CREDS).options.errors).toEqual({ deduplication: { enabled: true } });
+    });
+
+    it("can be turned off at init and back on at runtime", () => {
+      const config = new SDKConfig({ ...CREDS, options: { errors: { deduplication: { enabled: false } } } });
+      expect(enabled(config)).toBe(false);
+
+      config.updateConfig({ options: { errors: { deduplication: { enabled: true } } } });
+      expect(enabled(config)).toBe(true);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("takes a boolean as shorthand for { enabled }, at init and at runtime", () => {
+      const config = new SDKConfig({ ...CREDS, options: { errors: { deduplication: false } } });
+      expect(config.options.errors).toEqual({ deduplication: { enabled: false } });
+      expect(config.providedOptions?.errors).toEqual({ deduplication: { enabled: false } });
+
+      config.updateConfig({ options: { errors: { deduplication: true } } });
+      expect(enabled(config)).toBe(true);
+
+      config.updateConfig({ options: { errors: { deduplication: false } } });
+      expect(enabled(config)).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it("keeps the setting when an update leaves the group out", () => {
+      const config = new SDKConfig({ ...CREDS, options: { errors: { deduplication: { enabled: false } } } });
+
+      config.updateConfig({ options: { errors: {} } });
+      config.updateConfig({ options: { errors: { deduplication: undefined } } });
+      expect(enabled(config)).toBe(false);
+      expect(warnSpy).not.toHaveBeenCalled();
+    });
+
+    it.each([null, "off", 0])("ignores a deduplication of %j (untyped caller), with a warning", (value) => {
+      const config = new SDKConfig({ ...CREDS, options: { errors: { deduplication: { enabled: false } } } });
+
+      config.updateConfig({ options: { errors: { deduplication: value } } as never });
+      expect(enabled(config)).toBe(false);
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("must be an object or a boolean"));
+    });
+
+    it("warns that a non-boolean enabled is used by its truthiness", () => {
+      const config = new SDKConfig({ ...CREDS, options: { errors: { deduplication: { enabled: "false" } } } as never });
+      expect(enabled(config)).toBe("false");
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("got a string, so deduplication is on"));
     });
   });
 

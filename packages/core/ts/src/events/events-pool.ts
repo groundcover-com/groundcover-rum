@@ -3,10 +3,11 @@ import { handleError } from "../common/error-handler";
 import { ConfigManager } from "../config/config-manager";
 import { SessionState } from "../session/session-state";
 import { Transporter } from "../transporter/transporter";
-import { BaseEvent, SessionAttributes } from "./types";
+import { BaseEvent, DedupeableEvent, SessionAttributes } from "./types";
 import { earliestTrustedEventTime } from "./event-time";
 import { DEFAULT_SDK_CONFIG_OPTIONS } from "../config/constants";
 import { Logger } from "../common/logger";
+import { PendingBatch } from "./pending-batch";
 
 // Cap on events held while the flush gate is closed (no presence yet); nothing
 // is sent meanwhile. Bounds a never-confirmed bot or background session — real
@@ -91,7 +92,8 @@ export interface EventsPoolDeps<TType extends string = string> {
 }
 
 export class EventsPool<TType extends string = string> {
-  private events: BaseEvent<TType>[] = [];
+  // Replaced whole whenever it is sent or dropped (clearBuffer).
+  private pending: PendingBatch<BaseEvent<TType>>;
   private timeoutId: ReturnType<typeof setTimeout> | null = null;
   private readonly transporter: Transporter;
   private readonly config: ConfigManager;
@@ -114,6 +116,7 @@ export class EventsPool<TType extends string = string> {
     this.transporter = deps.transporter;
     this.getDeviceAttributes = deps.getDeviceAttributes;
     this.eventsToSkipFlush = deps.eventsToSkipFlush;
+    this.pending = this.newBatch();
   }
 
   public initialize(): void {
@@ -138,7 +141,7 @@ export class EventsPool<TType extends string = string> {
         clearTimeout(this.timeoutId);
         this.timeoutId = null;
       }
-      this.events = [];
+      this.clearBuffer();
       this.initialized = false;
     } catch (error) {
       handleError(error);
@@ -162,7 +165,16 @@ export class EventsPool<TType extends string = string> {
   // rotation for a session that never earned presence, so its ghost events
   // neither ship nor leak into the next session id.
   discardBuffer(): void {
-    this.events = [];
+    this.clearBuffer();
+  }
+
+  // Every place the buffer is emptied goes through here.
+  private clearBuffer(): void {
+    this.pending = this.newBatch();
+  }
+
+  private newBatch(): PendingBatch<BaseEvent<TType>> {
+    return new PendingBatch(() => this.config.getConfig()?.options?.errors?.deduplication);
   }
 
   // The earliest trusted occurrence time still in the buffer, or null.
@@ -173,7 +185,7 @@ export class EventsPool<TType extends string = string> {
   // session id, so the new session's start must cover them or the batch claims
   // a session that began after its own events.
   getEarliestEventTimestamp(nowNs: number, maxAgeNs: number): number | null {
-    return earliestTrustedEventTime(this.events, nowNs, maxAgeNs);
+    return earliestTrustedEventTime(this.pending.events, nowNs, maxAgeNs);
   }
 
   // Gate is open when unset, or when the predicate says so. A throwing predicate
@@ -189,10 +201,14 @@ export class EventsPool<TType extends string = string> {
     }
   }
 
-  addEvent(event: BaseEvent<TType> | null): void {
+  addEvent(event: DedupeableEvent<TType> | null): void {
     if (!event || !this.initialized) return;
 
     try {
+      // What makes this event a repeat (error deduplication), saved before the
+      // hooks: they can't see it (hidden), change it (frozen) or lose it by
+      // returning a new event, so they can't change how the event groups.
+      const dedup = event.dedup;
       const beforeSend = this.config.getConfig()?.options?.beforeSend;
       const enrichEvent = this.config.getConfig()?.options?.enrichEvent;
 
@@ -254,18 +270,21 @@ export class EventsPool<TType extends string = string> {
         }
       }
 
+      // Buffered, or, for a repeat of an exception or error-level log already in
+      // this batch, counted on that event (error deduplication). After the
+      // hooks, so beforeSend and enrichEvent still see every occurrence and one
+      // they drop isn't counted. An event a hook turned into another type no
+      // longer groups as the old one.
+      //
       // Bounded buffer while gated: drop the newest once the cap is hit so a
       // never-confirmed session can't grow without bound. After onBeforeEnqueue,
       // so an event that just opened the gate is not capped; ungated = unbounded.
-      if (!this.isFlushAllowed() && this.events.length >= MAX_GATED_BUFFER_EVENTS) {
-        return;
-      }
-
-      this.events.push(outgoing);
+      const capacity = this.isFlushAllowed() ? Infinity : MAX_GATED_BUFFER_EVENTS;
+      const size = this.pending.add(outgoing, outgoing.type === event.type ? dedup : undefined, capacity);
+      if (size === null) return;
 
       const batchSize = resolveBatchSize(this.config.getConfig()?.options?.transport?.batchSize);
-
-      if (this.events.length >= batchSize && !this.eventsToSkipFlush.includes(outgoing.type)) {
+      if (size >= batchSize && !this.eventsToSkipFlush.includes(outgoing.type)) {
         this.flush();
       }
     } catch (error) {
@@ -288,7 +307,7 @@ export class EventsPool<TType extends string = string> {
       // Keep the periodic flush armed even when there is nothing to send —
       // otherwise one empty window (e.g. an idle gap) kills the heartbeat
       // and later events sit in the pool until batchSize or a lifecycle flush.
-      if (!this.events?.length) {
+      if (!this.pending.events.length) {
         this.scheduleFlush();
         return;
       }
@@ -308,7 +327,7 @@ export class EventsPool<TType extends string = string> {
 
       const batch = {
         sessionAttributes: this.getSessionAttributes(),
-        events: this.events,
+        events: this.pending.toSend(),
       };
       // Only pass the options arg on the lifecycle path — the periodic /
       // batch-threshold path uses the async encoder by default.
@@ -317,7 +336,7 @@ export class EventsPool<TType extends string = string> {
       } else {
         this.transporter.send(batch);
       }
-      this.events = [];
+      this.clearBuffer();
       this.scheduleFlush();
     } catch (error) {
       handleError(error);
@@ -326,7 +345,7 @@ export class EventsPool<TType extends string = string> {
 
   async flushSync() {
     try {
-      if (!this.events?.length || !this.initialized) return;
+      if (!this.pending.events.length || !this.initialized) return;
 
       // flushSync runs only from setSessionId, right before an id flip. A
       // never-confirmed session's events must not survive it (sending mints a
@@ -343,9 +362,9 @@ export class EventsPool<TType extends string = string> {
 
       await this.transporter.send({
         sessionAttributes: this.getSessionAttributes(),
-        events: this.events,
+        events: this.pending.toSend(),
       });
-      this.events = [];
+      this.clearBuffer();
     } catch (error) {
       handleError(error);
     }

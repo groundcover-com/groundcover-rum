@@ -1,0 +1,37 @@
+{
+  "url": "https://ingest.golden.example/json/rum",
+  "headers": {
+    "Content-Type": "application/json",
+    "apikey": "golden-api-key",
+    "Content-Encoding": ""
+  },
+  "body": {
+    "sessionAttributes": {
+      "cluster": "golden-cluster",
+      "env": "golden-env",
+      "namespace": "golden-namespace",
+      "releaseId": "golden-release",
+      "service.name": "golden-app",
+      "user": {
+        "id": "user-1",
+        "email": "user@example.com"
+      },
+      "session_start_time": 1800000000000000000
+    },
+    "events": [
+      {
+        "type": "exception",
+        "parentSpanId": "",
+        "timestamp": 1800000000000000000,
+        "attributes": {
+          "error_type": "Error",
+          "error_message": "golden failure",
+          "error_fingerprint": "Error:golden failure",
+          "error_handled": true,
+          "error_metadata.stage": "test",
+          "error_repeat_count": 3
+        }
+      }
+    ]
+  }
+}

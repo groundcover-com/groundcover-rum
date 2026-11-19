@@ -24,6 +24,7 @@ simulator test can't always read the checkout itself.
 | `custom-event.json` | `sendCustomEvent("purchase", {"amount": 42, "nested": {"sku": "abc"}})` |
 | `log-event.json` | a `warn` log, `"golden log line"`, with `{"context": "checkout"}` |
 | `exception-event.json` | `captureException` of a handled `Error("golden failure")` with metadata `{"stage": "test"}` |
+| `exception-repeat-event.json` | Browser and React Native only, until the other SDKs merge repeats. With `config.json` but `transport.batchSize: 10`, so the calls share one batch: the same `captureException` as above, made from one call site at +0 s, +1 s and +2 s, then the app is hidden or backgrounded. The flush sends one request with one exception: the first occurrence, with `error_repeat_count: 3`. |
 
 Presence is the platform's genuine user signal: a pointer event on the web, a tap on mobile.
 

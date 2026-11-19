@@ -34,6 +34,11 @@ import {
 import groundcover from '@groundcover/browser'
 import axios from 'axios'
 
+// The "Error Loop" button. tests/e2e/playground/error-deduplication.spec.ts
+// asserts on both values.
+const ERROR_LOOP_COUNT = 50
+const ERROR_LOOP_MESSAGE = 'Unable to decode file'
+
 function App({ title }: { title?: string }) {
   const navigate = useNavigate()
   const [networkRequest, setNetworkRequest] = useState({
@@ -168,6 +173,17 @@ function App({ title }: { title?: string }) {
 
   const simulateError = () => {
     throw new Error('This is a simulated error!')
+  }
+
+  // The same uncaught error thrown over and over from one place, the way a
+  // failing retry or render loop does it. Each throw runs in its own microtask
+  // so the browser reports every one as uncaught. Exercises error deduplication.
+  const triggerErrorLoop = () => {
+    for (let i = 0; i < ERROR_LOOP_COUNT; i++) {
+      queueMicrotask(() => {
+        throw new Error(ERROR_LOOP_MESSAGE)
+      })
+    }
   }
 
   const testConsoleError = () => {
@@ -673,6 +689,11 @@ function App({ title }: { title?: string }) {
       <Button onClick={simulateError} variant="destructive">
         <Bug className="mr-2" />
         Throw Error
+      </Button>
+
+      <Button onClick={triggerErrorLoop} variant="destructive">
+        <Bug className="mr-2" />
+        Error Loop
       </Button>
 
       <Dialog>
