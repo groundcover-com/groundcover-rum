@@ -132,11 +132,12 @@ test.describe("RUM SDK Playground", () => {
 
   test.describe("Error Tracking", () => {
     test("should capture unhandled errors", async ({ page }) => {
-      const requestPromise = waitForRumRequest(page);
-      await playgroundPage.throwError();
-      await playgroundPage.throwError();
-      await playgroundPage.throwError();
-      await playgroundPage.throwError();
+      const batches = trackRumBatches(page);
+      for (let i = 0; i < 4; i++) await playgroundPage.throwError();
+      // The four throws are one error, merged into a single event (or a few,
+      // if another send cut between them) that stays under batchSize. Flush
+      // Events crosses batchSize so it ships now, not at the 10s heartbeat.
+      await playgroundPage.flushEvents();
 
       await validateRumEvent(page, EventType.EXCEPTION, {
         error_type: "Error",
@@ -144,6 +145,12 @@ test.describe("RUM SDK Playground", () => {
         error_handled: false,
         error_fingerprint: "Error:This is a simulated error!"
       }, { waitForRequest: false });
+      // Every throw is counted: a merged event stands for error_repeat_count throws.
+      const thrown = () =>
+        collectedEvents(batches, EventType.EXCEPTION)
+          .filter((event) => event.attributes?.error_message === "This is a simulated error!")
+          .reduce((sum, event) => sum + (event.attributes?.error_repeat_count ?? 1), 0);
+      await expect.poll(thrown).toBe(4);
     });
 
     test("should capture manually captured exceptions with metadata", async ({ page }) => {

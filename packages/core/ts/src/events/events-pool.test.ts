@@ -3,8 +3,11 @@ import { EventsPool, MAX_GATED_BUFFER_EVENTS } from "./events-pool";
 import type { ConfigManager } from "../config/config-manager";
 import type { SessionState } from "../session/session-state";
 import type { Transporter } from "../transporter/transporter";
-import { BaseEvent } from "./types";
+import { BaseEvent, DedupeableEvent, ErrorEventAttributes } from "./types";
 import { msToNs } from "../common/global";
+import { EventEnricher } from "./event-enricher";
+import { exceptionDedup } from "./errors/exception-dedup";
+import { errorLogDedup } from "./logs/log-dedup";
 
 // Create a mock send function that we can spy on
 const mockSend = vi.fn();
@@ -1275,6 +1278,322 @@ describe("EventsPool", () => {
 
       expect(() => eventsPool.flush()).not.toThrow();
       expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  // What makes two events the same is in errors/exception-dedup.test.ts,
+  // logs/log-dedup.test.ts and event-enricher.test.ts; these cover what reaches
+  // the transporter. Events are built the way the listeners build them, so they
+  // carry the hidden `dedup` the enricher attaches.
+  describe("error deduplication", () => {
+    const enricher = new EventEnricher();
+    const exceptionAttributes = (message = "Unable to decode file"): ErrorEventAttributes => ({
+      error_type: "Error",
+      error_message: message,
+      error_fingerprint: `Error:${message}`,
+      error_handled: false,
+      error_stacktrace: [],
+    });
+    const exception = (attributes = exceptionAttributes()): DedupeableEvent =>
+      enricher.enrich({ type: "exception", attributes, dedup: exceptionDedup(attributes) });
+    const other = (message: string) => exception(exceptionAttributes(message));
+
+    const sentEvents = (): BaseEvent[] =>
+      mockSend.mock.calls.flatMap(([batch]) => (batch as { events: BaseEvent[] }).events);
+    const sentExceptions = () => sentEvents().filter((event) => event.type === "exception");
+    const repeatCounts = () => sentExceptions().map((event) => event.attributes?.error_repeat_count);
+    const occurrences = () =>
+      sentExceptions().reduce((sum, event) => sum + ((event.attributes?.error_repeat_count as number) ?? 1), 0);
+
+    const setOptions = (options: Record<string, unknown>) => {
+      const config = configManager.getConfig();
+      configManager.getConfig.mockReturnValue({ ...config, options: { ...config.options, ...options } });
+    };
+
+    beforeEach(() => {
+      eventsPool.initialize();
+    });
+
+    it("counts repeats in a batch on the first occurrence instead of buffering them", () => {
+      const first = exception();
+      eventsPool.addEvent(first);
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+
+      eventsPool.flush();
+
+      expect(sentExceptions()).toHaveLength(1);
+      expect(sentExceptions()[0]!.id).toBe(first.id);
+      expect(repeatCounts()).toEqual([4]);
+    });
+
+    it("writes the count on a copy, so the event a hook holds never changes", () => {
+      const seen: BaseEvent[] = [];
+      setOptions({ beforeSend: (event: BaseEvent) => (seen.push(event), true) });
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+      eventsPool.flush();
+
+      expect(repeatCounts()).toEqual([3]);
+      expect(sentExceptions()[0]).not.toBe(seen[0]);
+      for (const event of seen) expect(event.attributes).not.toHaveProperty("error_repeat_count");
+    });
+
+    it("sends its own count, whatever a hook left on the event", () => {
+      setOptions({
+        enrichEvent: (event: BaseEvent) => ({ ...event, attributes: { ...event.attributes, error_repeat_count: 99 } }),
+      });
+      for (let i = 0; i < 2; i++) eventsPool.addEvent(exception());
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([2]);
+    });
+
+    it("leaves a single occurrence unchanged", () => {
+      eventsPool.addEvent(exception());
+      eventsPool.flush();
+      expect(sentExceptions()[0]!.attributes).not.toHaveProperty("error_repeat_count");
+    });
+
+    it("starts again with each batch, and the counts add up across batches", () => {
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+      eventsPool.flush();
+      for (let i = 0; i < 4; i++) eventsPool.addEvent(exception());
+      eventsPool.flush();
+
+      expect(repeatCounts()).toEqual([3, 4]);
+      expect(occurrences()).toBe(7);
+    });
+
+    it("keeps different errors apart", () => {
+      eventsPool.addEvent(exception());
+      eventsPool.addEvent(other("Other failure"));
+      eventsPool.addEvent(exception());
+      eventsPool.flush();
+
+      expect(sentExceptions().map((event) => event.attributes?.error_message)).toEqual([
+        "Unable to decode file",
+        "Other failure",
+      ]);
+      expect(repeatCounts()).toEqual([2, undefined]);
+    });
+
+    it("never merges other event types", () => {
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(createMockEvent({ type: "custom" }));
+      eventsPool.flush();
+      expect(sentEvents()).toHaveLength(3);
+    });
+
+    it("merges error-level logs the same way, counting in log_repeat_count", () => {
+      const message = "Network Error: timeout";
+      const log = (level: string) =>
+        enricher.enrich({ type: "log", attributes: { message, level }, dedup: errorLogDedup(message, level) });
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(log("error"));
+      for (let i = 0; i < 2; i++) eventsPool.addEvent(log("warn"));
+      eventsPool.flush();
+
+      const logs = sentEvents().filter((event) => event.type === "log");
+      expect(logs.map((event) => [event.attributes?.level, event.attributes?.log_repeat_count])).toEqual([
+        ["error", 3],
+        ["warn", undefined],
+        ["warn", undefined],
+      ]);
+    });
+
+    it("keeps repeats on different pages apart, since the enricher puts the page in the key", () => {
+      let path = "/checkout";
+      const onPage = new EventEnricher({ enrichAttributes: () => ({ location: { path } }) });
+      const pageException = () => {
+        const attributes = exceptionAttributes();
+        return onPage.enrich({ type: "exception", attributes, dedup: exceptionDedup(attributes) });
+      };
+
+      eventsPool.addEvent(pageException());
+      path = "/cart";
+      eventsPool.addEvent(pageException());
+      path = "/checkout";
+      eventsPool.addEvent(pageException());
+      eventsPool.flush();
+
+      expect(repeatCounts()).toEqual([2, undefined]);
+    });
+
+    it("never merges a recovered hang, which its listener builds without dedup", () => {
+      const stall = () =>
+        enricher.enrich({
+          type: "exception",
+          attributes: {
+            error_type: "AppHang",
+            error_message: "Main thread blocked for 3000ms",
+            error_fingerprint: "AppHang:3s",
+            error_handled: false,
+            error_stacktrace: [],
+          },
+        });
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(stall());
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([undefined, undefined, undefined]);
+    });
+
+    it("sends a loop every batchSize occurrences, so a crash loses no more than before", () => {
+      // batchSize is 5 in the fake config.
+      for (let i = 0; i < 4; i++) eventsPool.addEvent(exception());
+      expect(mockSend).not.toHaveBeenCalled();
+
+      for (let i = 0; i < 46; i++) eventsPool.addEvent(exception());
+      expect(mockSend).toHaveBeenCalledTimes(10);
+      expect(repeatCounts()).toEqual(Array(10).fill(5));
+      expect(occurrences()).toBe(50);
+    });
+
+    it("sends a loop as each occurrence alone when batchSize is 0", () => {
+      setOptions({ transport: { batchSize: 0, batchTimeout: 1000 } });
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+      expect(repeatCounts()).toEqual([undefined, undefined, undefined]);
+    });
+
+    it("a lifecycle flush sends the merged event like any other", () => {
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+      eventsPool.flush({ lifecycle: true });
+      expect(mockSend.mock.calls[0]![1]).toEqual({ lifecycle: true });
+      expect(repeatCounts()).toEqual([3]);
+    });
+
+    it("discardBuffer drops the merged event, and the next occurrence starts fresh", () => {
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+      eventsPool.discardBuffer();
+      eventsPool.addEvent(exception());
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([undefined]);
+    });
+
+    it("destroy forgets the merged event", () => {
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+      eventsPool.destroy();
+      eventsPool.initialize();
+      eventsPool.addEvent(exception());
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([undefined]);
+    });
+
+    it("flushSync sends the merged event, and the next occurrence starts fresh", async () => {
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+      await eventsPool.flushSync();
+      eventsPool.addEvent(exception());
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([3, undefined]);
+    });
+
+    it("sends every exception when deduplication is off", () => {
+      setOptions({ errors: { deduplication: { enabled: false } } });
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([undefined, undefined, undefined]);
+    });
+
+    it("reads the setting live, so turning it off stops merging at once", () => {
+      eventsPool.addEvent(exception());
+      eventsPool.addEvent(exception());
+      setOptions({ errors: { deduplication: { enabled: false } } });
+      eventsPool.addEvent(exception());
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([2, undefined]);
+      expect(occurrences()).toBe(3);
+    });
+
+    it("beforeSend sees every occurrence, and one it drops is not counted", () => {
+      let calls = 0;
+      const beforeSend = vi.fn(() => calls++ % 2 === 0); // keeps the 1st, 3rd, 5th
+      setOptions({ beforeSend });
+
+      for (let i = 0; i < 6; i++) eventsPool.addEvent(exception());
+      eventsPool.flush();
+
+      expect(beforeSend).toHaveBeenCalledTimes(6);
+      expect(repeatCounts()).toEqual([3]);
+    });
+
+    it("groups as the SDK built the event: a hook rewriting or replacing it can't change that", () => {
+      let i = 0;
+      setOptions({
+        enrichEvent: (event: BaseEvent) => ({
+          ...event,
+          attributes: { ...event.attributes, error_fingerprint: `custom:${i++}` },
+        }),
+      });
+      for (let n = 0; n < 3; n++) eventsPool.addEvent(exception());
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([3]);
+      expect(sentExceptions()[0]!.attributes?.error_fingerprint).toBe("custom:0");
+    });
+
+    it("sends on its own an event a hook turned into another type", () => {
+      setOptions({ enrichEvent: (event: BaseEvent) => ({ ...event, type: "custom" }) });
+      for (let n = 0; n < 3; n++) eventsPool.addEvent(exception());
+      eventsPool.flush();
+      expect(sentEvents().map((event) => [event.type, event.attributes?.error_repeat_count])).toEqual([
+        ["custom", undefined],
+        ["custom", undefined],
+        ["custom", undefined],
+      ]);
+    });
+
+    it("never sends dedup, and the hooks don't see it", () => {
+      const seen: string[][] = [];
+      setOptions({ beforeSend: (event: BaseEvent) => (seen.push(Object.keys(event)), true) });
+      for (let n = 0; n < 2; n++) eventsPool.addEvent(exception());
+      eventsPool.flush();
+
+      expect(seen.flat()).not.toContain("dedup");
+      expect(JSON.stringify(sentEvents())).not.toContain("dedup");
+    });
+
+    it("merges an event enrichEvent froze, since the count goes on a copy", () => {
+      setOptions({
+        enrichEvent: (event: BaseEvent) => Object.freeze({ ...event, attributes: Object.freeze({ ...event.attributes }) }),
+      });
+      for (let i = 0; i < 2; i++) eventsPool.addEvent(exception());
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([2]);
+    });
+
+    it("lets the session observer see every occurrence", () => {
+      const observer = vi.fn();
+      eventsPool.setBeforeEnqueueHook(observer);
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+      expect(observer).toHaveBeenCalledTimes(3);
+    });
+
+    it("an error loop before presence takes one slot in the gated buffer", () => {
+      eventsPool.setFlushGate(() => false);
+      for (let i = 0; i < MAX_GATED_BUFFER_EVENTS + 100; i++) eventsPool.addEvent(exception());
+      eventsPool.addEvent(createMockEvent({ type: "custom", id: "real-user-event" }));
+
+      eventsPool.setFlushGate(null);
+      eventsPool.flush();
+
+      expect(sentEvents().map((event) => event.id)).toContain("real-user-event");
+      expect(repeatCounts()).toEqual([MAX_GATED_BUFFER_EVENTS + 100]);
+    });
+
+    it("while sends are held, a loop asks for a send every batchSize occurrences, not on each", () => {
+      eventsPool.setFlushGate(() => false);
+      const flush = vi.spyOn(eventsPool, "flush");
+      // batchSize is 5 in the fake config: the merged count reaches 5, 10, ... 50.
+      for (let i = 0; i < 50; i++) eventsPool.addEvent(exception());
+      expect(flush).toHaveBeenCalledTimes(10);
+
+      eventsPool.setFlushGate(null);
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([50]);
+    });
+
+    it("a held buffer keeps counting until it is sent", () => {
+      eventsPool.setFlushGate(() => false);
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(exception());
+      vi.advanceTimersByTime(5000); // heartbeats while gated: held, not cleared
+      for (let i = 0; i < 2; i++) eventsPool.addEvent(exception());
+
+      eventsPool.setFlushGate(null);
+      eventsPool.flush();
+      expect(repeatCounts()).toEqual([5]);
     });
   });
 });

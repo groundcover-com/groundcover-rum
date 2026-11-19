@@ -40,4 +40,7 @@ export const DEFAULT_SDK_CONFIG_OPTIONS: SDKOptions = {
     compression: true,
   },
   sessionMaxDuration: DEFAULT_SESSION_MAX_DURATION_MS,
+  errors: {
+    deduplication: { enabled: true },
+  },
 };

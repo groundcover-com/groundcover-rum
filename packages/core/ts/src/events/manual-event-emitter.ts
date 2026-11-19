@@ -5,6 +5,7 @@ import { redactLogFields } from "../privacy/redaction";
 import { ConfigManager } from "../config/config-manager";
 import { EventsPool } from "./events-pool";
 import { EventEnricher } from "./event-enricher";
+import { errorLogDedup } from "./logs/log-dedup";
 import { CoreEventType, LogLevel } from "./types";
 
 // `TExtra` (default `string` — see base-listener.ts for why not `never`)
@@ -83,13 +84,15 @@ export class ManualEventEmitter<TExtra extends string = string> {
         userAttributes
       );
 
+      const text = truncate({ text: safeMessage });
       const enrichedEvent = this.enricher.enrich({
         type: "log",
         attributes: {
           ...safeAttributes,
-          message: truncate({ text: safeMessage }),
+          message: text,
           level,
         },
+        dedup: errorLogDedup(text, level),
       });
 
       this.pool.addEvent(enrichedEvent);

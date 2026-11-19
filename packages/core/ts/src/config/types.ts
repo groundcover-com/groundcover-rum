@@ -111,6 +111,31 @@ export interface TransportOptions {
   compression?: boolean;
 }
 
+/**
+ * Merging repeats of the same error, so an error loop doesn't send an event per
+ * occurrence. Within each batch, a repeat of an exception or error-level log
+ * already waiting to be sent is counted on that event (`error_repeat_count` /
+ * `log_repeat_count`, the occurrences it stands for) instead of sent again, so a
+ * batch carries one event per distinct error, with the first occurrence's
+ * context. A batch is still sent every `transport.batchSize` occurrences.
+ * "The same" means the same page or screen, and for an exception the same type,
+ * message (first 400 characters, after redaction), handled flag and stack; for a
+ * log, the same message.
+ */
+export interface ErrorDeduplicationOptions {
+  /** Merge repeated errors within a batch (default true). `false` sends every occurrence. */
+  enabled?: boolean;
+}
+
+/** How errors are reported. */
+export interface ErrorReportingOptions {
+  /**
+   * Merging repeated identical errors; see {@link ErrorDeduplicationOptions}.
+   * `false` / `true` is shorthand for `{ enabled: false }` / `{ enabled: true }`.
+   */
+  deduplication?: ErrorDeduplicationOptions | boolean;
+}
+
 // `TEvent` is the platform's event type — the shape `beforeSend` / `enrichEvent`
 // see. Core has no event map of its own, so the default is the open envelope; a
 // platform instantiates `SDKOptions<ItsEvent>` (or redeclares the two hooks) to
@@ -144,6 +169,8 @@ export interface SDKOptions<
   tracing?: TracingOptions;
   /** Batching & delivery of outgoing events; see {@link TransportOptions}. */
   transport?: TransportOptions;
+  /** How errors are reported: merging of repeated exceptions and error-level logs; see {@link ErrorReportingOptions}. */
+  errors?: ErrorReportingOptions;
   /**
    * Target maximum wall-clock duration of a session, in ms. Enforced LAZILY on activity, so NOT
    * a hard bound — an idle session keeps its id past the cap, which deliberately avoids minting

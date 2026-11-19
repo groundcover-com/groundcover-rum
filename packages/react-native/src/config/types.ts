@@ -32,6 +32,8 @@ export type {
   Redactor,
   TracingOptions,
   TransportOptions,
+  ErrorReportingOptions,
+  ErrorDeduplicationOptions,
 } from "@groundcover/rum-core";
 
 export type { InteractionEventAttributes, NavigationEventAttributes, ScreenAttributes };

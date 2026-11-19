@@ -111,7 +111,7 @@ each SDK instance, and `0.0.1-rc.2` matches `tracing.propagationUrls` against th
 These are breaking changes from `0.0.1-rc.0`:
 
 ```bash
-npm install @groundcover/react-native@0.0.1-rc.8
+npm install @groundcover/react-native@0.0.1-rc.9
 ```
 
 | Change | Migration |
@@ -225,6 +225,7 @@ groundcover.init({
     privacy:   { /* … */ },
     tracing:   { /* … */ },
     transport: { /* … */ },
+    errors:    { /* … */ },
     native:    { /* … */ },  // RN-only: native-feature tuning
   },
 });
@@ -369,6 +370,52 @@ Batching and delivery of outgoing event batches.
 > `Content-Encoding` header, so a gzipped batch can reach the intake unlabeled and
 > fail to decode. If you see decode failures, set `transport: { compression: false }`
 > to send plain JSON.
+
+### `options.errors`
+
+How JavaScript errors are reported.
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `deduplication.enabled` | `boolean` | `true` | Merge repeats of the same error within a batch. `false` sends every occurrence. `deduplication: false` is shorthand for `{ enabled: false }`. |
+
+An error loop can send the same exception, or log the same error, thousands of times. With
+deduplication on, a repeat of an exception or an error-level log that is still waiting in the current
+batch is counted on that event instead of sent again. The event sent is the first occurrence in the
+batch, with `error_repeat_count` (exceptions) or `log_repeat_count` (logs) set to how many
+occurrences it stands for, itself included. Events without the field stand for one, so the true
+count of an error is the sum of the field over its events.
+
+- **The same error** means the same screen (the `screen` the SDK stamps: its name and React
+  Navigation route key, so opening the screen anew starts a new event), and for an exception the
+  same type, message (its first 400 characters, after redaction), handled flag and stack trace, that
+  is, thrown through the same code path; for a log, the same message. Other attributes and metadata
+  don't count. An uncaught value that isn't an `Error` (a rejected object or string, a thrown
+  object) carries no stack from your code, so those group by the value's shape, its keys or text,
+  not by where they came from; a value passed to `captureException` keeps your stack.
+- **A merged event keeps the first occurrence's context**: its timestamp, ids, metadata and anything
+  a hook added. Later occurrences add only to the count. The same error on another screen
+  is never merged, so each keeps its own event.
+- **How much it saves**: at most one event per error per batch. A batch is still sent once an error
+  reaches `transport.batchSize` occurrences, so an error loop is sent as often as before, and a
+  crash loses no more of it, but as one event per batch instead of one per occurrence: 1,000
+  occurrences with the default `batchSize` of 10 are 100 events.
+- **Hooks** still see every occurrence: `beforeSend` and `enrichEvent` run first, an occurrence
+  `beforeSend` drops isn't counted, and the count is set on a copy when the batch is sent, so the
+  hooks never see `error_repeat_count` or `log_repeat_count`. Which events are the same is decided
+  when the SDK builds them, so a hook that rewrites or replaces an event doesn't change how it groups;
+  one that changes its `type` sends it on its own.
+- **Native crashes and app hangs** are never merged. A crash from a previous run is one per launch,
+  and every recovered hang (`AppHang`, `ANR`) is reported on its own, since each carries its own
+  duration.
+
+```ts
+options: {
+  errors: {
+    deduplication: false, // send every occurrence
+  },
+}
+```
 
 ### Updating config at runtime
 
@@ -968,11 +1015,13 @@ flowchart TD
    on purpose: a rotation derives the new session's start time from the event, and a hook that
    moved a timestamp earlier than the pre-enrichment value would ship an event predating the very
    session it opened.
-7. **Batch** — buffered and flushed on `transport.batchTimeout`, on
-   backgrounding, and on reaching `transport.batchSize` — except for `navigation`, `interaction`
+7. **Deduplicate (exceptions and error-level logs)** — a repeat of one already in the current
+   batch is counted instead of buffered again; see [`options.errors`](#optionserrors).
+8. **Batch** — buffered and flushed on `transport.batchTimeout`, on
+   backgrounding, and on reaching `transport.batchSize` (a merged error counts its occurrences) — except for `navigation`, `interaction`
    and `performance` events, which never trigger the size flush on their own. A buffer holding
    only those (taps and screen changes, the common mobile case) ships on the timeout instead.
-8. **Send** — gzipped (`transport.compression`) and delivered to intake.
+9. **Send** — gzipped (`transport.compression`) and delivered to intake.
 
 Which listeners exist is decided once, at `init`, by [`enabledEvents`](#options--top-level-knobs).
 In Expo Go the native module is absent, so the native branch of the diagram simply doesn't exist.
