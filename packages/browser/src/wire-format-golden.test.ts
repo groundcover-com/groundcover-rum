@@ -1,12 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { gunzipSync, strFromU8 } from "fflate";
 
 import { SessionManager } from "@/session-manager/session-manager";
 import { Batch, BaseEvent } from "@groundcover/rum-core/events/types";
 import { msToNs } from "@groundcover/rum-core/common/global";
 import { SDKConfigInput, BrowserSessionAttributes } from "@/config/types";
+import { BASE_CONFIG, drainAsyncSends, fixture } from "@/test-utils/pipeline";
 
 // GOLDEN WIRE-FORMAT SUITE — characterization tests for the exact payload the backend ingests
 // at {dsn}/json/rum: endpoint, headers, batch envelope, sessionAttributes and per-event
@@ -23,15 +22,6 @@ import { SDKConfigInput, BrowserSessionAttributes } from "@/config/types";
 const HEX_32 = /^[0-9a-f]{32}$/;
 const HEX_16 = /^[0-9a-f]{16}$/;
 const TRACE_ID = /^0{16}[0-9a-f]{16}$/;
-
-// __dirname rather than import.meta.url: under happy-dom, `URL` is the DOM's, not Node's.
-const FIXTURE_DIR = join(__dirname, "../../core/wire");
-const fixture = (file: string): unknown => JSON.parse(readFileSync(join(FIXTURE_DIR, file), "utf8"));
-
-// wire/config.json, shared with every golden: a bare-host dsn (pins the getEndpoint()
-// https:// upgrade), and batchSize 0 so every enqueued event triggers a flush (except types in
-// EVENTS_TO_SKIP_FLUSH), keeping the tests deterministic without timers.
-const BASE_CONFIG = fixture("config.json") as SDKConfigInput;
 
 // The clock the fixture files were sent on (2027-01-15T08:00:00Z), so their times are exact.
 const FIXTURE_CLOCK_MS = 1_800_000_000_000;
@@ -62,14 +52,6 @@ function simulatePresence(): void {
   // pointerdown is a raw-input presence signal (UserPresenceMonitor) that no
   // event listener turns into an SDK event — presence only, no dom.event.
   window.dispatchEvent(new Event("pointerdown"));
-}
-
-async function drainAsyncSends(): Promise<void> {
-  // transporter.send awaits the async encode path before calling fetch; a few
-  // macrotask turns are enough for all pending sends to reach the fetch stub.
-  for (let i = 0; i < 5; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
 }
 
 describe("wire-format golden contract", () => {

@@ -1,5 +1,6 @@
 package com.groundcover.rum.core.platform
 
+import com.groundcover.rum.core.common.RumDiagnostics
 import com.groundcover.rum.core.transport.BatchRequest
 import com.groundcover.rum.core.transport.BatchSender
 import java.net.HttpURLConnection
@@ -16,8 +17,13 @@ private const val TIMEOUT_MS = 30_000
 internal class HttpBatchSender(
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { r ->
         Thread(r, "gc-rum-sender").apply { isDaemon = true }
-    }
+    },
+    private val diagnostics: RumDiagnostics = RumDiagnostics.shared
 ) : BatchSender {
+    // A 401 or 403 means the ingest refuses the apiKey or dsn, so every batch is dropped until
+    // they're fixed: warned about once, even with debug off. Only touched on the sender's thread.
+    private var warnedRefusedKey = false
+
     override fun send(endpoint: String, request: BatchRequest, completion: (Boolean) -> Unit) {
         executor.execute {
             val delivered = try {
@@ -41,6 +47,7 @@ internal class HttpBatchSender(
             connection.setFixedLengthStreamingMode(request.body.size)
             connection.outputStream.use { it.write(request.body) }
             val status = connection.responseCode
+            warnIfKeyRefused(status, endpoint)
             // Read to the end, so the connection can be reused.
             (if (status in 200..299) connection.inputStream else connection.errorStream)
                 ?.use { it.readBytes() }
@@ -48,5 +55,16 @@ internal class HttpBatchSender(
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun warnIfKeyRefused(status: Int, endpoint: String) {
+        if (status != 401 && status != 403) return
+        if (warnedRefusedKey) return
+        warnedRefusedKey = true
+        diagnostics.warn(
+            "[groundcover] $endpoint rejected a batch with HTTP $status. Check the apiKey and " +
+                "dsn passed to Groundcover.start(): no RUM data is recorded until they are " +
+                "accepted."
+        )
     }
 }

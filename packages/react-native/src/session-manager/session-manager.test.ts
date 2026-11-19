@@ -227,6 +227,24 @@ describe("RNSessionManager — session composition", () => {
     expect(fetchMock).not.toHaveBeenCalled(); // not sampled → nothing sent
   });
 
+  // ── Ingest rejections (RN's live sender passes the fetch response through to core) ──
+  it("warns once, with debug off, when the endpoint refuses the credentials", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    fetchMock.mockResolvedValue({ ok: false, status: 401 });
+    sdk = new RNSessionManager(BASE, storage());
+
+    sdk.reportInteraction(tap());
+    sdk.sendCustomEvent({ event: "first", attributes: {} });
+    sdk.sendCustomEvent({ event: "second", attributes: {} });
+    await drain();
+
+    expect(fetchMock.mock.calls.length).toBeGreaterThan(1);
+    const rejections = warn.mock.calls.map((call) => String(call[0])).filter((m) => m.includes("HTTP 401"));
+    expect(rejections).toEqual([
+      expect.stringContaining("https://ingest.example/json/rum rejected a batch with HTTP 401"),
+    ]);
+  });
+
   // ── Native session snapshot ──
   //
   // Native holds a copy of the session envelope so a crash — which kills the JS

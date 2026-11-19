@@ -69,24 +69,24 @@ The artifacts are on Maven Central (`mavenCentral()` in your repositories). In y
 ```kotlin
 // build.gradle.kts
 dependencies {
-    implementation("com.groundcover:rum-android:0.0.1-rc.2")
+    implementation("com.groundcover:rum-android:0.0.1-rc.3")
 
     // Optional: one per integration your app uses.
-    implementation("com.groundcover:rum-android-okhttp:0.0.1-rc.2")
-    implementation("com.groundcover:rum-android-compose:0.0.1-rc.2")
-    implementation("com.groundcover:rum-android-timber:0.0.1-rc.2")
+    implementation("com.groundcover:rum-android-okhttp:0.0.1-rc.3")
+    implementation("com.groundcover:rum-android-compose:0.0.1-rc.3")
+    implementation("com.groundcover:rum-android-timber:0.0.1-rc.3")
 }
 ```
 
 ```groovy
 // build.gradle
 dependencies {
-    implementation 'com.groundcover:rum-android:0.0.1-rc.2'
+    implementation 'com.groundcover:rum-android:0.0.1-rc.3'
 
     // Optional: one per integration your app uses.
-    implementation 'com.groundcover:rum-android-okhttp:0.0.1-rc.2'
-    implementation 'com.groundcover:rum-android-compose:0.0.1-rc.2'
-    implementation 'com.groundcover:rum-android-timber:0.0.1-rc.2'
+    implementation 'com.groundcover:rum-android-okhttp:0.0.1-rc.3'
+    implementation 'com.groundcover:rum-android-compose:0.0.1-rc.3'
+    implementation 'com.groundcover:rum-android-timber:0.0.1-rc.3'
 }
 ```
 

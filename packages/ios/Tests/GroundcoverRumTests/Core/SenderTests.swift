@@ -108,6 +108,28 @@ private func send(_ sender: URLSessionBatchSender, headers: [String: String] = [
         #expect(await send(aSender()) == false)
     }
 
+    @Test func aRefusedKeyWarnsOnceWithDebugOff() async {
+        final class Lines: @unchecked Sendable {
+            var all: [String] = []
+        }
+        let lines = Lines()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubProtocol.self]
+        let sender = URLSessionBatchSender(
+            configuration: configuration,
+            diagnostics: RumDiagnostics(sink: { lines.all.append($0) }))
+        for status in [401, 403, 401, 500] {
+            StubProtocol.status = status
+            #expect(await send(sender) == false)
+        }
+        #expect(
+            lines.all == [
+                "[groundcover] https://ingest.example/json/rum rejected a batch with HTTP 401. "
+                    + "Check the apiKey and dsn passed to Groundcover.start(): no RUM data is "
+                    + "recorded until they are accepted."
+            ])
+    }
+
     @Test func aNetworkFailureIsNotDelivered() async {
         StubProtocol.fails = true
         #expect(await send(aSender()) == false)

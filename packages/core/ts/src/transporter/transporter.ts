@@ -1,6 +1,7 @@
 import { ConfigManager } from "../config/config-manager";
 import { Batch } from "../events/types";
 import { Logger } from "../common/logger";
+import { safeWarn } from "../common/safe-warn";
 import { gzipSync, strToU8 } from "fflate";
 
 export interface EncodedPayload {
@@ -50,7 +51,9 @@ export interface BatchRequest {
 // batch reaches the wire; core owns what and when.
 //
 // Fire-and-forget by contract: Transporter never awaits the returned promise,
-// it only attaches a rejection handler, so a slow network can't stall a flush.
+// so a slow network can't stall a flush. It only attaches handlers: a
+// rejection is logged, and a resolved response with a 401 or 403 `status`
+// warns once (fetch resolves rather than rejects on 4xx and 5xx).
 export type BatchSender = (endpoint: string, request: BatchRequest) => Promise<unknown>;
 
 export interface TransporterDeps {
@@ -64,6 +67,7 @@ export class Transporter {
   private readonly config: ConfigManager;
   private readonly sendBatch: BatchSender;
   private readonly encodeAsync: AsyncEncoder | null;
+  private warnedRefusedKey = false;
 
   constructor(deps: TransporterDeps) {
     this.config = deps.config;
@@ -133,9 +137,11 @@ export class Transporter {
         method: "POST",
         headers,
         body: finalData,
-      }).catch(error => {
-        this.logger.log("Network error while sending batch:", error, { groundcoverIgnore: true });
-      });
+      })
+        .then(response => this.warnIfKeyRefused(response, endpoint))
+        .catch(error => {
+          this.logger.log("Network error while sending batch:", error, { groundcoverIgnore: true });
+        });
     } catch (error) {
       // Optional-chained like the try path above: this handler runs inside an
       // async fn, so a second throw here would surface as an unhandled
@@ -146,6 +152,17 @@ export class Transporter {
         });
       }
     }
+  }
+
+  // A 401 or 403 means the endpoint refuses the apiKey or dsn, so every batch
+  // is dropped until they're fixed: warn once, even with debug off.
+  private warnIfKeyRefused(response: unknown, endpoint: string): void {
+    const status = (response as { status?: unknown } | null | undefined)?.status;
+    if ((status !== 401 && status !== 403) || this.warnedRefusedKey) return;
+    this.warnedRefusedKey = true;
+    safeWarn(
+      `[groundcover] ${endpoint} rejected a batch with HTTP ${status}. Check the apiKey and dsn passed to init(): no RUM data is recorded until they are accepted.`
+    );
   }
 
   private buildEndpoint(): string {

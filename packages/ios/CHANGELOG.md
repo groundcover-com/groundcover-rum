@@ -4,6 +4,16 @@ All notable changes to `GroundcoverRum`, groundcover's iOS RUM SDK, are document
 project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.0.1-rc.3] — 2026-11-17
+
+The fourth release candidate. No breaking changes from `0.0.1-rc.2`.
+
+### Fixed
+
+- **A refused API key is no longer silent.** When the ingest endpoint answers 401 or 403, the SDK
+  warns once, even with `debug` off, so a wrong `apiKey` or `dsn` no longer looks like a working
+  SDK.
+
 ## [0.0.1-rc.2] — 2026-11-15
 
 The third release candidate. No changes to the SDK's behaviour from `0.0.1-rc.1`.

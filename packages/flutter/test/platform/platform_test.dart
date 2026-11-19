@@ -316,6 +316,38 @@ void main() {
       await HttpBatchSender().call(url, batch());
     });
 
+    test('a 401 or 403 warns once, with debug off', () async {
+      final testOverrides = HttpOverrides.current;
+      HttpOverrides.global = null;
+      addTearDown(() => HttpOverrides.global = testOverrides);
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      var status = 401;
+      server.listen((request) async {
+        await request.drain<void>();
+        request.response.statusCode = status;
+        await request.response.close();
+      });
+      final lines = <String>[];
+      final sink = RumDiagnostics.instance.sink;
+      RumDiagnostics.instance.sink = lines.add;
+      addTearDown(() => RumDiagnostics.instance.sink = sink);
+      final url = 'http://127.0.0.1:${server.port}/json/rum';
+      final sender = HttpBatchSender();
+      for (final answer in [401, 403, 401, 500]) {
+        status = answer;
+        await expectLater(
+          sender.call(url, batch()),
+          throwsA(isA<HttpException>()),
+        );
+      }
+      expect(lines, [
+        '[groundcover] $url rejected a batch with HTTP 401. Check the apiKey '
+            'and dsn passed to GroundcoverRum.init(): no RUM data is recorded '
+            'until they are accepted. (groundcoverIgnore)',
+      ]);
+    });
+
     test("builds its client outside the app's HttpOverrides", () {
       // An app's global override (a pinned CA, a badCertificateCallback)
       // is for its own traffic: through it, pinning fails every batch, and

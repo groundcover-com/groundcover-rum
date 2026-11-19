@@ -129,7 +129,7 @@ groundcover.init({
 | `debug` | `boolean` | `false` | Verbose SDK console logging. |
 | `sessionSampleRate` | `number` | `1` | Fraction of sessions captured (0–1). |
 | `enabledEvents` | `Array<…>` | `[]` | Instrumentations to enable. **Empty = all.** Members: `dom`, `network`, `exceptions`, `logs`, `pageload`, `navigation`, `performance`, `replay`. Note: `replay` still requires an explicit [`startReplayRecording()`](#session-replay) call — it never auto-starts. |
-| `excludedUrls` | `Array<string \| RegExp>` | — | Network requests matching these are not captured. |
+| `excludedUrls` | `Array<string \| RegExp>` | — | Network requests matching these are not captured. `data:` and `blob:` URLs are never captured: they are read from memory, not the network. |
 | `sessionMaxDuration` | `number` | `4h` | Target max session length in ms (1 min – 8 h). See [session lifecycle](#session-lifecycle). |
 | `beforeSend` | `(event) => boolean` | — | Drop gate — return `false` to discard an event. Runs after redaction/enrichment; see [event lifecycle](#architecture). |
 | `enrichEvent` | `(event) => event` | — | Mutate/replace an event before batching. Runs right after `beforeSend`; see [event lifecycle](#architecture). |
@@ -372,8 +372,9 @@ These are always treated as sensitive (case-insensitive); your `sensitiveKeys` a
 - **Key substrings** — matched as a substring of a body/query key or a DOM element attribute
   (`id`/`name`/`class`/`aria-label`/`placeholder`):
   `token`, `secret`, `passwd`, `password`, `api_key`, `access_key`, `write_key`, `auth`, `bearer`,
-  `credential`, `cvv`, `ssn`, `credit_card`, `card_number` (the `_` in the last five is optional —
-  `apikey` / `api-key` also match).
+  `credential`, `cvv`, `ssn`, `credit_card`, `card_number`. For `api_key`, `access_key`,
+  `write_key`, `credit_card` and `card_number` the separator is flexible — absent, `_` or `-` all
+  match, so `apikey`, `api_key` and `api-key` are equivalent. The rest match literally.
 - **Request/response headers** — always stripped regardless of `level`: `authorization`, `cookie`,
   `set-cookie`, plus any header name containing `token`, `key`, `secret`, `passwd`, `password`,
   `auth`, `bearer`, or `credential`.

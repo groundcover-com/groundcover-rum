@@ -1,5 +1,6 @@
 package com.groundcover.rum.core.platform
 
+import com.groundcover.rum.core.common.RumDiagnostics
 import com.groundcover.rum.core.transport.BatchRequest
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -30,11 +31,12 @@ class HttpBatchSenderTest {
 
     private fun send(
         endpoint: String = server.url("/json/rum").toString(),
-        headers: Map<String, String> = mapOf("apikey" to "k")
+        headers: Map<String, String> = mapOf("apikey" to "k"),
+        sender: HttpBatchSender = HttpBatchSender()
     ): Boolean {
         val latch = CountDownLatch(1)
         var delivered: Boolean? = null
-        HttpBatchSender().send(
+        sender.send(
             endpoint,
             BatchRequest(headers, "{\"events\":[]}".toByteArray(Charsets.UTF_8))
         ) {
@@ -61,6 +63,24 @@ class HttpBatchSenderTest {
     fun aNon2xxAnswerIsNotDelivered() {
         server.enqueue(MockResponse().setResponseCode(500))
         assertFalse(send())
+    }
+
+    @Test
+    fun aRefusedKeyWarnsOnceWithDebugOff() {
+        val lines = mutableListOf<String>()
+        val sender = HttpBatchSender(diagnostics = RumDiagnostics(sink = { lines.add(it) }))
+        listOf(401, 403, 401, 500).forEach { status ->
+            server.enqueue(MockResponse().setResponseCode(status))
+            assertFalse(send(sender = sender))
+        }
+        assertEquals(
+            listOf(
+                "[groundcover] ${server.url("/json/rum")} rejected a batch with HTTP 401. Check " +
+                    "the apiKey and dsn passed to Groundcover.start(): no RUM data is recorded " +
+                    "until they are accepted."
+            ),
+            lines
+        )
     }
 
     @Test

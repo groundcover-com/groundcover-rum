@@ -111,7 +111,7 @@ each SDK instance, and `0.0.1-rc.2` matches `tracing.propagationUrls` against th
 These are breaking changes from `0.0.1-rc.0`:
 
 ```bash
-npm install @groundcover/react-native@0.0.1-rc.7
+npm install @groundcover/react-native@0.0.1-rc.8
 ```
 
 | Change | Migration |
@@ -262,7 +262,7 @@ groundcover.init({
 | `sessionMaxDuration` | `number` | `14400000` (4 h) | Target max session length in ms (1 min – 8 h). See [session lifecycle](#session-lifecycle). |
 | `enabledEvents` | `RNEventName[]` | `[]` | Listeners to enable. **Empty = all.** Members: `"interaction"`, `"network"`, `"logs"`, `"navigation"`, `"exceptions"`, and the [dev-build-only](#native-features) `"crashes"`, `"hangs"`, `"appStart"`, `"vitals"`. |
 | `native` | `NativeOptions` | — | Tuning for the [native features](#native-features): `hangThresholdMs` (250–60,000 ms), `vitalsMaxSegmentMs` (1,000–300,000 ms), `tti`. Out-of-range values fall back to the default. Enabling/disabling lives in `enabledEvents`. |
-| `excludedUrls` | `Array<string \| RegExp>` | — | Network requests matching these are not captured. Strings support `*` / `?` globs; otherwise matched exactly. |
+| `excludedUrls` | `Array<string \| RegExp>` | — | Network requests matching these are not captured. Strings support `*` / `?` globs; otherwise matched exactly. `data:` and `blob:` URLs are never captured: they are read from memory, not the network. |
 | `appVersion` | `string` | — | App version stamped on session attributes. See [App version stamping](#app-version-stamping). |
 | `appBuild` | `string` | — | App build number stamped on session attributes. See [App version stamping](#app-version-stamping). |
 | `beforeSend` | `(event) => boolean` | — | Drop gate — return `false` to discard an event. Receives dot-flattened attributes. See below. |
@@ -1145,8 +1145,9 @@ namespace (`{ default: AsyncStorage }`), so both `import AsyncStorage from …` 
 ## Session lifecycle
 
 `sessionMaxDuration` sets a **target** maximum wall-clock session length (default
-4 hours / `14400000` ms; must be between 1 minute and 8 hours — out-of-range or
-invalid values fall back to the default with a `console.warn`).
+4 hours / `14400000` ms; must be between 1 minute and 8 hours — an out-of-range or
+invalid value falls back to the default at `init`, and keeps the current cap in
+`updateConfig`, with a `console.warn`).
 
 Rotation is **activity-gated, not timer-driven** — so the cap is not a hard upper
 bound:

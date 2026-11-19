@@ -86,6 +86,31 @@ describe("SDKConfig", () => {
       expect(warnSpy).toHaveBeenCalledTimes(1);
     });
 
+    it("keeps the cap chosen at init when an update is out of range", () => {
+      const twoHours = 2 * 60 * 60 * 1000;
+      const config = new SDKConfig({ ...CREDS, options: { sessionMaxDuration: twoHours } });
+
+      config.updateConfig({ options: { sessionMaxDuration: 12 * 60 * 60 * 1000 } });
+
+      expect(config.options.sessionMaxDuration).toBe(twoHours);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain("using 120 minutes");
+    });
+
+    it("keeps the cap from an earlier valid update when a later one is out of range", () => {
+      const config = new SDKConfig({ ...CREDS });
+      config.updateConfig({ options: { sessionMaxDuration: 30 * 60 * 1000 } });
+
+      config.updateConfig({ options: { sessionMaxDuration: 1_000 } });
+
+      expect(config.options.sessionMaxDuration).toBe(30 * 60 * 1000);
+    });
+
+    it("names the 4-hour default it uses when the init value is out of range", () => {
+      new SDKConfig({ ...CREDS, options: { sessionMaxDuration: -1 } });
+      expect(String(warnSpy.mock.calls[0]?.[0])).toContain("using 240 minutes");
+    });
+
     it("updateConfig preserves valid sessionMaxDuration", () => {
       const config = new SDKConfig({ apiKey: "k", cluster: "c", environment: "e", dsn: "d", appId: "a" });
       const sixHours = 6 * 60 * 60 * 1000;

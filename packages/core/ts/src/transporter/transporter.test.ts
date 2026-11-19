@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, MockedFunction } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi, MockedFunction } from 'vitest';
 import { AsyncEncoder, Transporter } from './transporter';
 import { Logger } from '../common/logger';
 import { ConfigManager } from '../config/config-manager';
@@ -191,12 +191,57 @@ describe('Transporter', () => {
       mockFetch.mockRejectedValueOnce(networkError);
 
       await transporter.send(testBatch);
+      // send() never awaits the sender, so its handlers run after send() returns.
+      await new Promise(resolve => setTimeout(resolve, 0));
 
       expect(mockLogger.log).toHaveBeenCalledWith(
         'Network error while sending batch:',
         networkError,
         { groundcoverIgnore: true }
       );
+    });
+
+    // fetch resolves, not rejects, on 4xx and 5xx: before this was read, an
+    // endpoint that refused every batch looked exactly like one that took them.
+    describe('an endpoint that refuses the key', () => {
+      const ENDPOINT = 'https://test-endpoint.com/json/rum';
+      let warnSpy: ReturnType<typeof vi.spyOn>;
+
+      beforeEach(() => {
+        warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      });
+
+      afterEach(() => {
+        warnSpy.mockRestore();
+      });
+
+      // send() never awaits the sender, so the response handler runs after it returns.
+      const sendAndSettle = async (response: unknown) => {
+        mockFetch.mockResolvedValueOnce(response);
+        await transporter.send(testBatch);
+        await new Promise(resolve => setTimeout(resolve, 0));
+      };
+
+      it('warns once, without debug, on a 401 or 403', async () => {
+        await sendAndSettle({ ok: false, status: 401 });
+        await sendAndSettle({ ok: false, status: 403 });
+        await sendAndSettle({ ok: false, status: 401 });
+
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        const message = String(warnSpy.mock.calls[0]?.[0]);
+        expect(message).toContain(`${ENDPOINT} rejected a batch with HTTP 401`);
+        expect(message).toContain('apiKey');
+        // The SDK's own console capture skips messages carrying this marker.
+        expect(message).toContain('groundcoverIgnore');
+      });
+
+      it('says nothing for any other answer', async () => {
+        await sendAndSettle({ ok: true, status: 202 });
+        await sendAndSettle({ ok: false, status: 500 });
+        await sendAndSettle(undefined);
+
+        expect(warnSpy).not.toHaveBeenCalled();
+      });
     });
 
     it('should not send request when no API key is provided', async () => {
