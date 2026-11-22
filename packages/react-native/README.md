@@ -1128,7 +1128,8 @@ path:
 
 2. **Auto-detect** — omit `storage` and the SDK attempts to `require` the peer
    itself. Convenient for a plain single-package app; fragile in monorepos (see
-   above).
+   above). This relies on Metro's `allowOptionalDependencies`, which the default
+   React Native (0.74+) and Expo (SDK 51+) Metro configs turn on.
 
 3. **Memory-only degrade** — if the peer is absent, hydration fails, or it exceeds
    the 3s hydration budget, the SDK runs **memory-only**: telemetry works

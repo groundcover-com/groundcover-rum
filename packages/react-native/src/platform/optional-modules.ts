@@ -3,6 +3,11 @@
 // bundle and fails at runtime with `Unknown named module`, silently dropping the SDK to
 // memory-only storage. A literal require in a try/catch is exactly the shape Metro's
 // `allowOptionalDependencies` treats as optional, resolving a missing peer to null.
+//
+// The build has to preserve that shape, and tsup doesn't on its own: every `require("…")`
+// in this file is made external and restored to a literal call after bundling by
+// scripts/optional-requires.mjs (wired in tsup.config.ts). A new optional peer only needs
+// its loader here; the build fails if its require doesn't come out literal.
 
 export function loadAsyncStorage<T = unknown>(): T | null {
   try {
