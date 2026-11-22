@@ -9,6 +9,8 @@ import {
   Redactor,
   RedactField,
   RedactKind,
+  ErrorReportingOptions,
+  ErrorDeduplicationOptions,
 } from "./config/types";
 import { UserIdentifiers } from "@groundcover/rum-core/events/types";
 import { SessionManager } from "./session-manager/session-manager";
@@ -22,6 +24,8 @@ export type {
   Redactor,
   RedactField,
   RedactKind,
+  ErrorReportingOptions,
+  ErrorDeduplicationOptions,
 };
 
 declare global {
