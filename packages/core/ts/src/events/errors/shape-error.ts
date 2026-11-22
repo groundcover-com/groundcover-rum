@@ -5,6 +5,7 @@ import { truncate } from "../../common/text";
 import type { ErrorEventAttributes } from "../types";
 import type { EnrichInput } from "../event-enricher";
 import { capturedValueOf, serializeCapturedValue } from "./coerce-error";
+import { exceptionDedup } from "./exception-dedup";
 
 export type StackFrame = { filename: string; function: string; lineno: number; colno: number };
 
@@ -78,5 +79,5 @@ export function shapeErrorEvent(
     error_metadata: safeMetadata,
   };
 
-  return { type: "exception", attributes };
+  return { type: "exception", attributes, dedup: exceptionDedup(attributes) };
 }

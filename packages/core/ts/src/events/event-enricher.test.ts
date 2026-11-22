@@ -351,4 +351,37 @@ describe('EventEnricher', () => {
       expect(values).not.toContain('bottom');
     });
   });
+
+  describe("dedup", () => {
+    const DEDUP = { key: 7, countAttribute: "error_repeat_count" };
+    const onView = (view: Record<string, unknown>) => new EventEnricher({ enrichAttributes: () => view });
+    const build = (enricher: EventEnricher) =>
+      enricher.enrich({ type: "exception", attributes: { error_message: "x" }, dedup: DEDUP });
+
+    it("carries the producer's dedup, keyed by the view too", () => {
+      const event = build(onView({ location: { path: "/a" } }));
+      expect(event.dedup).toEqual({ key: expect.any(Number), countAttribute: "error_repeat_count" });
+      expect(event.dedup!.key).not.toBe(DEDUP.key);
+      expect(build(onView({ location: { path: "/a" } })).dedup!.key).toBe(event.dedup!.key);
+      expect(build(onView({ location: { path: "/b" } })).dedup!.key).not.toBe(event.dedup!.key);
+    });
+
+    it("attaches it hidden and frozen: never serialized or spread, and not changed in place", () => {
+      const event = build(onView({}));
+      expect(Object.keys(event)).not.toContain("dedup");
+      expect(JSON.stringify(event)).not.toContain("dedup");
+      expect({ ...event }).not.toHaveProperty("dedup");
+      expect(Object.isFrozen(event.dedup)).toBe(true);
+    });
+
+    it("leaves an event its producer didn't make dedupeable without one", () => {
+      expect(onView({}).enrich({ type: "exception", attributes: {} }).dedup).toBeUndefined();
+    });
+
+    it("leaves the event unmergeable when the view can't be serialized", () => {
+      const cyclic: Record<string, unknown> = {};
+      cyclic.self = cyclic;
+      expect(build(onView({ location: cyclic })).dedup).toBeUndefined();
+    });
+  });
 });

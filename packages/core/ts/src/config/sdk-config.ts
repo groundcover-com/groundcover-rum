@@ -39,13 +39,15 @@ export interface ConfigExtension {
   isOpaqueNode?: (value: unknown) => boolean;
 }
 
-// The groups core itself owns. `tracing.origin` is `{name,value}`, so it merges
-// one level deeper. The config struct is small and fixed, so the merge is
-// spelled out explicitly rather than handled by a generic recursive merge.
+// The groups core itself owns. `tracing.origin` is `{name,value}` and
+// `errors.deduplication` is `{enabled}`, so each merges one level deeper. The
+// config struct is small and fixed, so the merge is spelled out explicitly
+// rather than handled by a generic recursive merge.
 const CORE_NESTED_OPTIONS: Readonly<Record<string, readonly string[]>> = {
   privacy: [],
   tracing: ["origin"],
   transport: [],
+  errors: ["deduplication"],
 };
 
 interface ResolvedExtension {
@@ -150,6 +152,30 @@ function mergeGroup(
   return merged;
 }
 
+// `errors.deduplication: false` (or `true`) is shorthand for `{ enabled }`. The
+// merge only deep-merges objects, so the shorthand is expanded first. Any other
+// non-object is ignored by the merge, and a non-boolean `enabled` is used by its
+// truthiness like the other boolean options; both warn, since neither may do
+// what the caller meant (`enabled: "false"` turns nothing off).
+function expandErrorOptions(
+  options: Partial<SDKOptions> | undefined
+): Partial<SDKOptions> | undefined {
+  const errors = (options as Record<string, unknown> | undefined)?.errors;
+  if (!isPlainObject(errors) || errors.deduplication === undefined) return options;
+  const deduplication = errors.deduplication;
+  if (typeof deduplication === "boolean") {
+    return { ...options, errors: { ...errors, deduplication: { enabled: deduplication } } };
+  }
+  if (!isPlainObject(deduplication)) {
+    safeWarn("[groundcover] options.errors.deduplication must be an object or a boolean; ignoring it");
+  } else if (deduplication.enabled !== undefined && typeof deduplication.enabled !== "boolean") {
+    safeWarn(
+      `[groundcover] options.errors.deduplication.enabled must be a boolean; got a ${typeof deduplication.enabled}, so deduplication is ${deduplication.enabled ? "on" : "off"}`
+    );
+  }
+  return options;
+}
+
 // Merge `incoming` options over `base`. Top-level keys and each nested group
 // merge one level deep; each group's deep sub-objects merge one deeper.
 // Pollution-safe by construction: values are combined with object spread (which
@@ -227,8 +253,9 @@ export class SDKConfig {
     this.namespace = input?.namespace || "";
     this.releaseId = input?.releaseId;
     this.user = input?.user || null;
-    this.providedOptions = { ...(input?.options || {}) };
-    this.options = mergeOptions(defaults, input?.options || {}, nestedOptions);
+    const options = expandErrorOptions(input?.options);
+    this.providedOptions = { ...(options || {}) };
+    this.options = mergeOptions(defaults, options || {}, nestedOptions);
     this.options.sessionMaxDuration = SDKConfig.normalizeSessionMaxDuration(
       input?.options?.sessionMaxDuration,
       DEFAULT_SESSION_MAX_DURATION_MS
@@ -274,12 +301,13 @@ export class SDKConfig {
       // than replacing the whole group — and, for providedOptions, so the
       // explicit-vs-default distinction used by resolvePrivacy survives runtime
       // updates.
+      const options = expandErrorOptions(updates.options) ?? {};
       this.providedOptions = mergeOptions(
         this.providedOptions || {},
-        updates.options,
+        options,
         nestedOptions
       );
-      this.options = mergeOptions(this.options, updates.options, nestedOptions);
+      this.options = mergeOptions(this.options, options, nestedOptions);
       if (updates.options.sessionMaxDuration !== undefined) {
         this.options.sessionMaxDuration = SDKConfig.normalizeSessionMaxDuration(
           updates.options.sessionMaxDuration,

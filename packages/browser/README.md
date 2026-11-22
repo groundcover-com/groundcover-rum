@@ -102,6 +102,7 @@ groundcover.init({
     privacy:   { /* … */ },
     tracing:   { /* … */ },
     transport: { /* … */ },
+    errors:    { /* … */ },
     replay:    { /* … */ },
   },
 });
@@ -170,6 +171,49 @@ Batching and delivery of outgoing events.
 | `batchSize` | `number` | `10` | Max events buffered before a batch flushes. |
 | `batchTimeout` | `number` | `10000` | Max ms a batch waits before flushing regardless of size. |
 | `compression` | `boolean` | `true` | Gzip-compress batches (offloaded to the Web Worker when available). |
+
+### `options.errors`
+
+How errors are reported. From `2.3.0-rc.0` (`npm install @groundcover/browser@rc`).
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `deduplication.enabled` | `boolean` | `true` | Merge repeats of the same error within a batch. `false` sends every occurrence. `deduplication: false` is shorthand for `{ enabled: false }`. |
+
+An error loop can send the same exception, or log the same error, thousands of times. With
+deduplication on, a repeat of an exception or an error-level log that is still waiting in the current
+batch is counted on that event instead of sent again. The event sent is the first occurrence in the
+batch, with `error_repeat_count` (exceptions) or `log_repeat_count` (logs) set to how many
+occurrences it stands for, itself included. Events without the field stand for one, so the true
+count of an error is the sum of the field over its events.
+
+- **The same error** means the same page (the `location` the SDK stamps: path, URL and title), and
+  for an exception the same type, message (its first 400 characters, after redaction), handled flag
+  and stack trace, that is, thrown through the same code path; for a log, the same message. Other
+  attributes and metadata don't count. An uncaught value that isn't an `Error` (a rejected object or
+  string, a thrown object) carries no stack from your code, so those group by the value's shape, its
+  keys or text, not by where they came from; a value passed to `captureException` keeps your stack.
+- **A merged event keeps the first occurrence's context**: its timestamp, ids, metadata and anything
+  a hook added. Later occurrences add only to the count. The same error on another page
+  is never merged, so each keeps its own event.
+- **How much it saves**: at most one event per error per batch. A merged event counts as one toward
+  `transport.batchSize`, however often it repeats, so a loop alone doesn't fill a batch: it is sent
+  with the batch, when `transport.batchTimeout` passes, other events fill it, or the page is hidden.
+  A loop that runs for a minute while nothing else is captured is 6 events at the default 10-second
+  `batchTimeout`, however many times it throws.
+- **Hooks** still see every occurrence: `beforeSend` and `enrichEvent` run first, an occurrence
+  `beforeSend` drops isn't counted, and the count is set on a copy when the batch is sent, so the
+  hooks never see `error_repeat_count` or `log_repeat_count`. Which events are the same is decided
+  when the SDK builds them, so a hook that rewrites or replaces an event doesn't change how it groups;
+  one that changes its `type` sends it on its own.
+
+```ts
+options: {
+  errors: {
+    deduplication: false, // send every occurrence
+  },
+}
+```
 
 ### `options.replay`
 
@@ -439,8 +483,9 @@ flowchart TD
 3. **Enrich (internal)** — the SDK stamps id / span & trace ids / timestamps / `location` (location query params are redacted here too).
 4. **`beforeSend(event)`** — your hook; return `false` to **drop** the event. Receives the fully-redacted, enriched event.
 5. **`enrichEvent(event)`** — your hook; mutate or replace the event before it’s buffered.
-6. **Batch** — buffered in the events pool, flushed at `transport.batchSize` or `transport.batchTimeout`.
-7. **Send** — gzipped (`transport.compression`) and delivered to intake.
+6. **Deduplicate (exceptions and error-level logs)** — a repeat of one already in the current batch is counted instead of buffered again; see [`options.errors`](#optionserrors).
+7. **Batch** — buffered in the events pool, flushed at `transport.batchSize` (a merged error counts once) or `transport.batchTimeout`.
+8. **Send** — gzipped (`transport.compression`) and delivered to intake.
 
 Supporting pieces:
 

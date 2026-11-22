@@ -103,12 +103,42 @@ export interface TracingOptions {
 
 /** Batching and delivery of outgoing event batches. */
 export interface TransportOptions {
-  /** Max events buffered before a batch is flushed (default 10). */
+  /**
+   * Max events buffered before a batch is flushed (default 10). A merged error
+   * (see {@link ErrorDeduplicationOptions}) is one event, however often it repeated.
+   */
   batchSize?: number;
   /** Max ms a batch waits before flushing regardless of size (default 10000). */
   batchTimeout?: number;
   /** Gzip-compress outgoing batches; offloaded to the platform's async encoder when it has one (default true). */
   compression?: boolean;
+}
+
+/**
+ * Merging repeats of the same error, so an error loop doesn't send an event per
+ * occurrence. Within each batch, a repeat of an exception or error-level log
+ * already waiting to be sent is counted on that event (`error_repeat_count` /
+ * `log_repeat_count`, the occurrences it stands for) instead of sent again, so a
+ * batch carries one event per distinct error, with the first occurrence's
+ * context. A merged event counts as one toward `transport.batchSize`, so a
+ * loop alone doesn't fill a batch: it goes out with the batch, on
+ * `transport.batchTimeout`, when other events fill it, or on a lifecycle flush.
+ * "The same" means the same page or screen, and for an exception the same type,
+ * message (first 400 characters, after redaction), handled flag and stack; for a
+ * log, the same message.
+ */
+export interface ErrorDeduplicationOptions {
+  /** Merge repeated errors within a batch (default true). `false` sends every occurrence. */
+  enabled?: boolean;
+}
+
+/** How errors are reported. */
+export interface ErrorReportingOptions {
+  /**
+   * Merging repeated identical errors; see {@link ErrorDeduplicationOptions}.
+   * `false` / `true` is shorthand for `{ enabled: false }` / `{ enabled: true }`.
+   */
+  deduplication?: ErrorDeduplicationOptions | boolean;
 }
 
 // `TEvent` is the platform's event type — the shape `beforeSend` / `enrichEvent`
@@ -144,6 +174,8 @@ export interface SDKOptions<
   tracing?: TracingOptions;
   /** Batching & delivery of outgoing events; see {@link TransportOptions}. */
   transport?: TransportOptions;
+  /** How errors are reported: merging of repeated exceptions and error-level logs; see {@link ErrorReportingOptions}. */
+  errors?: ErrorReportingOptions;
   /**
    * Target maximum wall-clock duration of a session, in ms. Enforced LAZILY on activity, so NOT
    * a hard bound — an idle session keeps its id past the cap, which deliberately avoids minting

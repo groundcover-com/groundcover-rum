@@ -1,8 +1,9 @@
 import { msToNs } from "../common/global";
 import { IdGenerator, RandomIdGenerator } from "../common/id-generator";
 import { Logger } from "../common/logger";
+import { hashText } from "../common/hash";
 
-import { BaseEvent } from "./types";
+import { BaseEvent, DedupInfo, DedupeableEvent } from "./types";
 
 /**
  * What a caller hands `EventEnricher.enrich`. Named so a platform can write `EnrichInput<"tap">`
@@ -16,6 +17,8 @@ export type EnrichInput<TType extends string = string> = Partial<
 > & {
   type: TType;
   attributes?: Record<string, unknown>;
+  /** What makes this event a repeat of another; see `DedupeableEvent`. Omitted: never merged. */
+  dedup?: DedupInfo;
 };
 
 /**
@@ -146,7 +149,7 @@ export class EventEnricher {
   // without having to parameterise the enricher at construction.
   enrich<TType extends string = string>(
     event: EnrichInput<TType>
-  ): BaseEvent<TType> {
+  ): DedupeableEvent<TType> {
     const now = msToNs(Date.now());
     const eventId = this.idGenerator.generateId();
     const spanId = event.spanId || this.idGenerator.generateSpanId();
@@ -156,7 +159,7 @@ export class EventEnricher {
 
     const platformAttributes = this.getPlatformAttributes();
 
-    const enrichedEvent: BaseEvent<TType> = {
+    const enrichedEvent: DedupeableEvent<TType> = {
       type: event.type,
       id: eventId,
       spanId,
@@ -183,6 +186,34 @@ export class EventEnricher {
       enrichedEvent.timestamp = validTimestamp(event.timestamp, now);
     }
 
+    if (event.dedup) this.attachDedup(enrichedEvent, event.dedup, platformAttributes);
+
     return enrichedEvent;
+  }
+
+  // The same error on another page or screen is a different one, so the key
+  // also covers where the event happened: whatever block the platform stamps
+  // (the web's `location`, React Native's `screen`).
+  //
+  // Hidden (non-enumerable): never serialized, and not seen when a hook logs or
+  // spreads the event. Frozen: a hook can't change the key in place. Left
+  // writable, so a strict-mode hook assigning to it doesn't throw (which would
+  // drop the event); the pool saved it before the hooks, so that changes
+  // nothing. Contained: a key that can't be built means the event never merges.
+  private attachDedup(
+    event: DedupeableEvent<string>,
+    dedup: DedupInfo,
+    platformAttributes: Record<string, unknown>
+  ): void {
+    try {
+      const key = hashText(JSON.stringify([dedup.key, platformAttributes]));
+      Object.defineProperty(event, "dedup", {
+        value: Object.freeze({ key, countAttribute: dedup.countAttribute }),
+        writable: true,
+        configurable: true,
+      });
+    } catch (error) {
+      this.logger.log("[event-enricher] could not build the dedup key; the event won't merge", error);
+    }
   }
 }

@@ -286,6 +286,8 @@ export type {
   AppStartMetricName,
   CallbackEvent,
   FlattenedEventAttributes,
+  ErrorReportingOptions,
+  ErrorDeduplicationOptions,
 } from "./config/types";
 
 // Test-only hook to reset module singletons between vitest cases.

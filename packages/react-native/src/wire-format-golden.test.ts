@@ -17,6 +17,7 @@ import { EMPTY_WALK, walkFiber } from "./react/fiber-walk";
 // but `tsc` resolves it to the real RN types — under which the stub's test-only
 // exports are invisible and `TextInput` is not the plain function the stub models.
 import ReactNativeModule, {
+  __emitAppState,
   __emitNativeSignal,
   __reset as resetRN,
   __setNativeModule,
@@ -1007,6 +1008,55 @@ describe("wire-format golden contract (react-native)", () => {
     it("exception-event.json", async () => {
       const sent = await onlyRequest((sdk) => sdk.captureException(new Error("golden failure"), { stage: "test" }));
       expect(sent).toEqual(fixture("exception-event.json"));
+    });
+
+    it("exception-repeat-event.json", async () => {
+      // batchSize 10, so the three calls share one batch.
+      const batched = {
+        ...BASE_CONFIG,
+        options: { ...BASE_CONFIG.options, transport: { ...BASE_CONFIG.options?.transport, batchSize: 10 } },
+      } as SDKConfigInput;
+      const nowSpy = vi.spyOn(Date, "now").mockReturnValue(FIXTURE_CLOCK_MS);
+      try {
+        const sdk = initSDK(batched);
+        sdk.reportInteraction(tap());
+        // One call site, so all three are the same error.
+        for (const offsetMs of [0, 1_000, 2_000]) {
+          nowSpy.mockReturnValue(FIXTURE_CLOCK_MS + offsetMs);
+          sdk.captureException(new Error("golden failure"), { stage: "test" });
+        }
+        __emitAppState("background");
+        await drain();
+      } finally {
+        nowSpy.mockRestore();
+      }
+      const calls = recordedCalls(fetchMock);
+      expect(calls).toHaveLength(1);
+      expect(sharedRequest(calls[0]!)).toEqual(fixture("exception-repeat-event.json"));
+    });
+
+    it("never merges the same error from different screens", async () => {
+      const batched = {
+        ...BASE_CONFIG,
+        options: { ...BASE_CONFIG.options, transport: { ...BASE_CONFIG.options?.transport, batchSize: 10 } },
+      } as SDKConfigInput;
+      const sdk = initSDK(batched);
+      sdk.reportInteraction(tap());
+      // One call site, so only the screen tells them apart.
+      for (const screen of ["Feed", "Checkout", "Checkout"]) {
+        sdk.startNavigation({ screen });
+        sdk.captureException(new Error("golden failure"), { stage: "test" });
+      }
+      __emitAppState("background");
+      await drain();
+
+      const screenOf = (attributes: Record<string, unknown> | undefined) =>
+        (attributes?.screen as { name?: string } | undefined)?.name ?? attributes?.["screen.name"];
+      const exceptions = allSentEvents(fetchMock).filter((event) => event.type === "exception");
+      expect(exceptions.map((event) => [screenOf(event.attributes), event.attributes?.error_repeat_count])).toEqual([
+        ["Feed", undefined],
+        ["Checkout", 2],
+      ]);
     });
   });
 
