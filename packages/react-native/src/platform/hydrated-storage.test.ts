@@ -102,6 +102,40 @@ describe("HydratedStorage", () => {
     expect(storage.getItem(KEY)).toBe("from-injected");
   });
 
+  it("hydrates from AsyncStorage 3.x, which has getMany instead of multiGet", async () => {
+    // 3.x's default export: getMany returns a { key: value } record, and there is
+    // no multiGet. Keys getMany leaves out read as null and aren't seeded.
+    const getMany = vi.fn(async (keys: string[]) =>
+      Object.fromEntries(keys.filter((k) => k === PREFIXED).map((k) => [k, "from-v3"]))
+    );
+    const v3 = {
+      getAllKeys: async () => [PREFIXED, "@groundcover:gone", "someone-else"],
+      getMany,
+      setItem: async () => {},
+      removeItem: async () => {},
+    };
+    const storage = await HydratedStorage.hydrate({ default: v3 });
+    expect(getMany).toHaveBeenCalledWith([PREFIXED, "@groundcover:gone"]);
+    expect(storage.getItem(KEY)).toBe("from-v3");
+    expect(storage.getItem("gone")).toBeNull();
+  });
+
+  it("falls back to memory-only when the backend has neither multiGet nor getMany", async () => {
+    const setItem = vi.fn(async () => {});
+    const unknown = {
+      getAllKeys: async () => [PREFIXED],
+      setItem,
+      removeItem: async () => {},
+    };
+    const storage = await HydratedStorage.hydrate(unknown);
+    expect(storage.getItem(KEY)).toBeNull();
+    // Still usable: writes go to the cache and keep mirroring to the backend.
+    storage.setItem(KEY, "memory");
+    expect(storage.getItem(KEY)).toBe("memory");
+    await new Promise((r) => setTimeout(r, 0));
+    expect(setItem).toHaveBeenCalledWith(PREFIXED, "memory");
+  });
+
   it("serializes mirrored backend writes so a setItem→removeItem can't resurrect deleted state", async () => {
     const store = new Map<string, string>();
     // Holder object (not a bare `let`): a variable assigned only inside the

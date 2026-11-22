@@ -1,5 +1,6 @@
 ### Fixed
 - **React Native — AsyncStorage is picked up without passing `storage`.** When `init()` gets no `storage`, the SDK now loads `@react-native-async-storage/async-storage` from your app, so a session continues across app restarts. Before, the published bundle looked the module up in a way Metro couldn't link, so the SDK always fell back to memory-only storage and started a fresh session on every launch. Passing `storage` explicitly works as before.
+- **React Native — sessions persist with AsyncStorage 3.x.** AsyncStorage 3 replaced `multiGet` with `getMany`, so the SDK couldn't read its saved state back and started a fresh session on every launch, whether AsyncStorage was passed in or picked up. It now reads with whichever of the two your version has.
 - **React Native — unhandled promise rejections are captured on JavaScriptCore.** Rejection tracking now hooks React Native's own Promise. Before, it was enabled on a private copy of the Promise library bundled into the SDK, so rejections from your app's promises were missed. Hermes, the default engine, is unchanged.
 
 ### Changed
