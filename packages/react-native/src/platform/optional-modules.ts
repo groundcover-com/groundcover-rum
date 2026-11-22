@@ -4,10 +4,11 @@
 // memory-only storage. A literal require in a try/catch is exactly the shape Metro's
 // `allowOptionalDependencies` treats as optional, resolving a missing peer to null.
 //
-// The build has to preserve that shape, and tsup doesn't on its own: every `require("…")`
-// in this file is made external and restored to a literal call after bundling by
-// scripts/optional-requires.mjs (wired in tsup.config.ts). A new optional peer only needs
-// its loader here; the build fails if its require doesn't come out literal.
+// The build has to preserve that shape, and tsup doesn't on its own: every string-literal
+// `require(…)` in this file is made external and kept literal by scripts/optional-requires.mjs
+// (wired in tsup.config.ts). A new optional peer only needs its loader here, with the require
+// directly in the try block. The build fails if a require comes out any other way, or if a
+// require() anywhere else in the SDK would ship through esbuild's shim.
 
 export function loadAsyncStorage<T = unknown>(): T | null {
   try {

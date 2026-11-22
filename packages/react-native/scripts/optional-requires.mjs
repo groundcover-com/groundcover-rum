@@ -1,46 +1,60 @@
 // Keeps the optional peers in src/platform/optional-modules.ts loadable by the
-// host app's bundler. tsup.config.ts wires in both halves; neither file ships.
+// host app's bundler. tsup.config.ts wires it in; this file doesn't ship.
 //
 // Each optional peer is loaded with a literal `require("<id>")` inside a
-// try/catch. That is the shape Metro links statically when
-// `allowOptionalDependencies` is on, as it is in @react-native/metro-config
-// (RN 0.74+) and @expo/metro-config (SDK 51+). A peer the app lacks becomes a
-// stub that throws at runtime, and the catch turns that into null.
+// try/catch. Metro links that shape statically when `allowOptionalDependencies`
+// is on, as it is in @react-native/metro-config (RN 0.74+) and
+// @expo/metro-config (SDK 51+). A peer the app lacks becomes a stub that throws
+// at runtime, and the catch turns that into null. Metro only treats the require
+// as optional when its statement sits directly in the try block.
 //
 // tsup does not keep that shape on its own:
 //   - A peer that isn't external gets bundled. With node-linker=hoisted, the
 //     build finds rn-playground's copy of expo-constants (and, through it,
 //     expo-modules-core) and the `promise` package, and inlines private copies.
-//   - esbuild routes `require()` in ESM output through its `__require` shim, and
-//     tsup's Rollup tree-shaking pass carries the ESM shim into the CJS build.
-//     Metro can't link a call through the shim: at runtime it hands
-//     metroRequire a package name, which Metro rejects, so the peer never loads.
+//   - With `treeshake`, tsup has esbuild emit ESM for both formats, and esbuild
+//     routes `require()` in ESM through its `__require` shim. Rollup then carries
+//     the shim into the CJS build too. Metro can't link a call through the shim:
+//     at runtime it hands metroRequire a package name, which Metro rejects, so
+//     the peer never loads.
 //
-// So the ids are external (OPTIONAL_REQUIRES, read from the source so the two
-// lists can't drift), `noInlinedNodeModules` fails the bundle if anything else
-// from node_modules would be inlined, and `restoreOptionalRequires` runs after
-// each build to put the literal requires back and check every one is there.
+// So:
+//   - OPTIONAL_REQUIRES (read from the source, so the two can't drift) are
+//     external in tsup.config.ts.
+//   - `noInlinedNodeModules` fails the bundle if anything else from
+//     node_modules would be inlined.
+//   - `optionalRequires`, a tsup plugin, turns each `__require("<id>")` back into
+//     `require("<id>")` before Rollup and terser run, which lets Rollup drop the
+//     unused shim. After the files are written, it fails the build unless every
+//     id is required literally, directly in a try block, and no shim is left (a
+//     require of anything else would still go through it).
 
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE = "src/platform/optional-modules.ts";
-const OUTPUTS = ["dist/index.js", "dist/index.mjs"];
 
-/** The module ids src/platform/optional-modules.ts loads with `require("…")`. */
-export const OPTIONAL_REQUIRES = [
-  ...readFileSync(join(pkgRoot, SOURCE), "utf8")
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+
+/** Reads the module ids src/platform/optional-modules.ts loads with `require("…")`. */
+function readOptionalRequires() {
+  const source = readFileSync(join(pkgRoot, SOURCE), "utf8")
     // Comments may mention require("…") without loading anything.
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/^\s*\/\/.*$/gm, "")
-    .matchAll(/\brequire\("([^"]+)"\)/g),
-].map((match) => match[1]);
-
-if (OPTIONAL_REQUIRES.length === 0) {
-  throw new Error(`[optional-requires] found no require("…") in ${SOURCE}`);
+    .replace(/(^|\s)\/\/.*$/gm, "$1");
+  const ids = [...source.matchAll(/\brequire\(\s*(["'`])([^"'`$]+)\1\s*\)/g)].map(
+    (match) => match[2]
+  );
+  if (ids.length === 0) {
+    throw new Error(`[optional-requires] found no require("…") in ${SOURCE}`);
+  }
+  return ids;
 }
+
+/** Read once, when tsup loads its config; the external list is built from it. */
+export const OPTIONAL_REQUIRES = readOptionalRequires();
 
 /**
  * esbuild plugin: fail the build if any file under node_modules would be
@@ -63,31 +77,74 @@ export const noInlinedNodeModules = {
   },
 };
 
-const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+/** A call loading `id`, through esbuild's shim (`__require`, `__require2`, …) or literally. */
+const callLoading = (id) =>
+  new RegExp(`(?<![\\w$.])(?:__require\\d*|require)\\((["'\`])${escapeRegExp(id)}\\1\\)`, "g");
 
-/** Post-build: turn each shimmed optional require back into a literal `require("…")`. */
-export function restoreOptionalRequires() {
-  for (const output of OUTPUTS) {
-    const file = join(pkgRoot, output);
-    let code = readFileSync(file, "utf8");
-    for (const id of OPTIONAL_REQUIRES) {
-      // The call esbuild left: `require("id")` or a (minified) shim such as `E("id")`.
-      const call = new RegExp(
-        `(?<![\\w$.])[A-Za-z_$][\\w$]*\\((["'])${escapeRegExp(id)}\\1\\)`,
-        "g"
+/** Throws unless `code` (a written bundle) loads every optional peer the way Metro needs. */
+export function checkOptionalRequires(code, file) {
+  const fail = (message) => {
+    throw new Error(`[optional-requires] ${file}: ${message}`);
+  };
+  const current = readOptionalRequires();
+  if (current.join("\n") !== OPTIONAL_REQUIRES.join("\n")) {
+    fail(
+      `${SOURCE} now requires ${current.join(", ")} but tsup loaded ` +
+        `${OPTIONAL_REQUIRES.join(", ")}; restart tsup so it re-reads them`
+    );
+  }
+  for (const id of OPTIONAL_REQUIRES) {
+    const literal = new RegExp(`(?<![\\w$.])require\\((["'])${escapeRegExp(id)}\\1\\)`, "g");
+    const calls = [...code.matchAll(literal)];
+    if (calls.length !== 1) {
+      fail(`expected one literal require("${id}"), found ${calls.length}`);
+    }
+    // Directly in a try block: an unclosed `try {` before it, with no brace in between.
+    const before = code.slice(Math.max(0, calls[0].index - 400), calls[0].index);
+    if (!/\btry\s*\{[^{}]*$/.test(before)) {
+      fail(
+        `require("${id}") is not directly inside a try block, so Metro would make it a ` +
+          "required dependency and apps without it would fail to bundle"
       );
-      const found = code.match(call) ?? [];
-      if (found.length !== 1) {
+    }
+  }
+  if (code.includes("Dynamic require of")) {
+    fail(
+      "esbuild's require shim is still in the bundle, so some require() goes through it " +
+        `and Metro can't link it. Load optional peers only from ${SOURCE}, with a string literal.`
+    );
+  }
+}
+
+/**
+ * tsup plugin. renderChunk runs before Rollup and terser, while esbuild's shim
+ * still has its own name; buildEnd runs after the files are written.
+ */
+export const optionalRequires = {
+  name: "optional-requires",
+  renderChunk(code, chunk) {
+    if (!/\.[cm]?js$/.test(chunk.path)) return;
+    let next = code;
+    for (const id of OPTIONAL_REQUIRES) {
+      const calls = next.match(callLoading(id)) ?? [];
+      if (calls.length !== 1) {
         throw new Error(
-          `[optional-requires] ${output}: expected exactly one call loading "${id}", found ` +
-            `${found.length}${found.length ? ` (${found.join(", ")})` : ""}`
+          `[optional-requires] ${chunk.path}: expected one call loading "${id}", found ` +
+            `${calls.length}${calls.length ? ` (${calls.join(", ")})` : ""}`
         );
       }
-      code = code.replace(call, `require(${JSON.stringify(id)})`);
+      next = next.replace(callLoading(id), () => `require(${JSON.stringify(id)})`);
     }
-    writeFileSync(file, code);
-  }
-  console.log(
-    `[optional-requires] literal require() of ${OPTIONAL_REQUIRES.join(", ")} in ${OUTPUTS.join(", ")}`
-  );
-}
+    return { code: next };
+  },
+  buildEnd({ writtenFiles }) {
+    for (const { name } of writtenFiles) {
+      if (!/\.[cm]?js$/.test(name)) continue;
+      checkOptionalRequires(readFileSync(name, "utf8"), name);
+    }
+    this.logger.info(
+      "optional-requires",
+      `literal require() of ${OPTIONAL_REQUIRES.join(", ")} (${this.format})`
+    );
+  },
+};

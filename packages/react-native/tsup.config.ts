@@ -2,7 +2,7 @@ import { defineConfig } from "tsup";
 import {
   OPTIONAL_REQUIRES,
   noInlinedNodeModules,
-  restoreOptionalRequires,
+  optionalRequires,
 } from "./scripts/optional-requires.mjs";
 
 export default defineConfig({
@@ -52,8 +52,9 @@ export default defineConfig({
   noExternal: ["@groundcover/rum-core"],
   // Fails the build if anything from node_modules would be inlined.
   esbuildPlugins: [noInlinedNodeModules],
-  // Runs after every build, watch rebuilds included.
-  onSuccess: async () => restoreOptionalRequires(),
+  // Restores the literal requires before Rollup and terser, then checks every
+  // written file (watch rebuilds included).
+  plugins: [optionalRequires],
   treeshake: true,
   tsconfig: "./tsconfig.json",
 });
