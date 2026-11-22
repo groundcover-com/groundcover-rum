@@ -396,10 +396,11 @@ count of an error is the sum of the field over its events.
 - **A merged event keeps the first occurrence's context**: its timestamp, ids, metadata and anything
   a hook added. Later occurrences add only to the count. The same error on another screen
   is never merged, so each keeps its own event.
-- **How much it saves**: at most one event per error per batch. A batch is still sent once an error
-  reaches `transport.batchSize` occurrences, so an error loop is sent as often as before, and a
-  crash loses no more of it, but as one event per batch instead of one per occurrence: 1,000
-  occurrences with the default `batchSize` of 10 are 100 events.
+- **How much it saves**: at most one event per error per batch. A merged event counts as one toward
+  `transport.batchSize`, however often it repeats, so a loop alone doesn't fill a batch: it is sent
+  with the batch, when `transport.batchTimeout` passes, other events fill it, or the app goes to the
+  background. A loop that runs for a minute while nothing else is captured is 6 events at the
+  default 10-second `batchTimeout`, however many times it throws.
 - **Hooks** still see every occurrence: `beforeSend` and `enrichEvent` run first, an occurrence
   `beforeSend` drops isn't counted, and the count is set on a copy when the batch is sent, so the
   hooks never see `error_repeat_count` or `log_repeat_count`. Which events are the same is decided
@@ -1018,7 +1019,7 @@ flowchart TD
 7. **Deduplicate (exceptions and error-level logs)** — a repeat of one already in the current
    batch is counted instead of buffered again; see [`options.errors`](#optionserrors).
 8. **Batch** — buffered and flushed on `transport.batchTimeout`, on
-   backgrounding, and on reaching `transport.batchSize` (a merged error counts its occurrences) — except for `navigation`, `interaction`
+   backgrounding, and on reaching `transport.batchSize` (a merged error counts once) — except for `navigation`, `interaction`
    and `performance` events, which never trigger the size flush on their own. A buffer holding
    only those (taps and screen changes, the common mobile case) ships on the timeout instead.
 9. **Send** — gzipped (`transport.compression`) and delivered to intake.

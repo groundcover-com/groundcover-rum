@@ -23,10 +23,11 @@ merged by default, see Changed.
   (exceptions) or `log_repeat_count` (logs) set to the occurrences it stands for. Repeats are the
   same error when they happen on the same screen and, for exceptions, are thrown through the same
   code path (the same stack). A merged event keeps the first occurrence's context: timestamp, ids
-  and metadata. A batch is still sent once an error reaches `transport.batchSize` occurrences.
-  Events without the field stand for one, so the total is the sum of the field; exception and
-  error-log counts that count events rather than summing it will read lower. Native crashes and app
-  hangs are never merged.
+  and metadata. A merged event counts as one toward `transport.batchSize`, so a loop no longer
+  fills batches by itself: it goes out with the batch, on `transport.batchTimeout` or when other
+  events fill it. Events without the field stand for one, so the total is the sum of the field;
+  exception and error-log counts that count events rather than summing it will read lower. Native
+  crashes and app hangs are never merged.
 
 ## [0.0.1-rc.8] — 2026-11-17
 

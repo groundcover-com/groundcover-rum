@@ -18,18 +18,18 @@ const on = () => new PendingBatch(() => undefined);
 describe("PendingBatch", () => {
   it("buffers new events, returning the buffer's length", () => {
     const batch = on();
-    expect(batch.add(event("a"), undefined, Infinity)).toEqual({ size: 1, merged: false });
-    expect(batch.add(event("b"), undefined, Infinity)).toEqual({ size: 2, merged: false });
+    expect(batch.add(event("a"), undefined, Infinity)).toBe(1);
+    expect(batch.add(event("b"), undefined, Infinity)).toBe(2);
     expect(batch.events.map((e) => e.attributes?.name)).toEqual(["a", "b"]);
   });
 
-  it("counts a repeat on the buffered event, returning its occurrences", () => {
+  it("counts a repeat on the buffered event, which adds no event to send", () => {
     const batch = on();
     const first = event("loop");
     batch.add(first, LOOP, Infinity);
     batch.add(event("a"), undefined, Infinity);
-    expect(batch.add(event("loop"), LOOP, Infinity)).toEqual({ size: 2, merged: true });
-    expect(batch.add(event("loop"), LOOP, Infinity)).toEqual({ size: 3, merged: true });
+    expect(batch.add(event("loop"), LOOP, Infinity)).toBe(2);
+    expect(batch.add(event("loop"), LOOP, Infinity)).toBe(2);
     expect(batch.events).toHaveLength(2);
 
     const sent = batch.toSend();
@@ -65,7 +65,7 @@ describe("PendingBatch", () => {
     const batch = on();
     batch.add(event("loop"), LOOP, 1);
     expect(batch.add(event("a"), undefined, 1)).toBeNull();
-    expect(batch.add(event("loop"), LOOP, 1)).toEqual({ size: 2, merged: true });
+    expect(batch.add(event("loop"), LOOP, 1)).toBe(1);
     expect(batch.events).toHaveLength(1);
   });
 
@@ -77,8 +77,9 @@ describe("PendingBatch", () => {
     expect(batch.events).toHaveLength(2);
 
     options = {};
-    expect(batch.add(event("loop"), LOOP, Infinity)).toEqual({ size: 3, merged: false }); // the first two were never tracked
-    expect(batch.add(event("loop"), LOOP, Infinity)).toEqual({ size: 2, merged: true }); // a repeat of the third
+    expect(batch.add(event("loop"), LOOP, Infinity)).toBe(3); // the first two were never tracked
+    expect(batch.add(event("loop"), LOOP, Infinity)).toBe(3); // a repeat of the third
+    expect(batch.toSend().map((e) => e.attributes?.repeat_count)).toEqual([undefined, undefined, 2]);
   });
 
   it("merges nothing when the setting can't be read", () => {

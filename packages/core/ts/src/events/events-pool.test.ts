@@ -1432,15 +1432,47 @@ describe("EventsPool", () => {
       expect(repeatCounts()).toEqual([undefined, undefined, undefined]);
     });
 
-    it("sends a loop every batchSize occurrences, so a crash loses no more than before", () => {
-      // batchSize is 5 in the fake config.
-      for (let i = 0; i < 4; i++) eventsPool.addEvent(exception());
+    it("counts a merged error as one event toward batchSize, so a loop alone goes out with the heartbeat", () => {
+      // batchSize is 5 and batchTimeout 1000 in the fake config.
+      for (let i = 0; i < 50; i++) eventsPool.addEvent(exception());
       expect(mockSend).not.toHaveBeenCalled();
 
-      for (let i = 0; i < 46; i++) eventsPool.addEvent(exception());
-      expect(mockSend).toHaveBeenCalledTimes(10);
-      expect(repeatCounts()).toEqual(Array(10).fill(5));
-      expect(occurrences()).toBe(50);
+      vi.advanceTimersByTime(1000);
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(repeatCounts()).toEqual([50]);
+    });
+
+    it("sends interleaved errors when the events to send reach batchSize, not their occurrences", () => {
+      for (let i = 0; i < 5; i++) {
+        eventsPool.addEvent(exception());
+        eventsPool.addEvent(other("Other failure"));
+      }
+      expect(mockSend).not.toHaveBeenCalled(); // ten occurrences, two events
+
+      for (let i = 0; i < 3; i++) eventsPool.addEvent(createMockEvent({ type: "custom" }));
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(repeatCounts()).toEqual([5, 5]);
+    });
+
+    it("a repeat into a buffer already at batchSize sends it, as any event would", () => {
+      eventsPool.addEvent(exception());
+      // "activity" skips the size send, so the buffer reaches 5 unsent.
+      for (let i = 0; i < 4; i++) eventsPool.addEvent(createMockEvent({ type: "activity" }));
+      expect(mockSend).not.toHaveBeenCalled();
+
+      eventsPool.addEvent(exception());
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      expect(repeatCounts()).toEqual([2]);
+    });
+
+    it("a fractional batchSize sends on the first event at or past it", () => {
+      setOptions({ transport: { batchSize: 2.5, batchTimeout: 1000 } });
+      eventsPool.addEvent(exception());
+      eventsPool.addEvent(other("Second failure"));
+      expect(mockSend).not.toHaveBeenCalled();
+
+      eventsPool.addEvent(other("Third failure"));
+      expect(mockSend).toHaveBeenCalledTimes(1);
     });
 
     it("sends a loop as each occurrence alone when batchSize is 0", () => {
@@ -1573,15 +1605,14 @@ describe("EventsPool", () => {
       expect(repeatCounts()).toEqual([MAX_GATED_BUFFER_EVENTS + 100]);
     });
 
-    it("while sends are held, a loop asks for a send every batchSize occurrences, not on each", () => {
+    it("while sends are held, a loop alone never asks for a send, and the heartbeat sends it once allowed", () => {
       eventsPool.setFlushGate(() => false);
       const flush = vi.spyOn(eventsPool, "flush");
-      // batchSize is 5 in the fake config: the merged count reaches 5, 10, ... 50.
       for (let i = 0; i < 50; i++) eventsPool.addEvent(exception());
-      expect(flush).toHaveBeenCalledTimes(10);
+      expect(flush).not.toHaveBeenCalled();
 
       eventsPool.setFlushGate(null);
-      eventsPool.flush();
+      vi.advanceTimersByTime(1000);
       expect(repeatCounts()).toEqual([50]);
     });
 

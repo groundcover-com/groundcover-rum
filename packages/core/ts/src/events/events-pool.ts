@@ -280,20 +280,15 @@ export class EventsPool<TType extends string = string> {
       // never-confirmed session can't grow without bound. After onBeforeEnqueue,
       // so an event that just opened the gate is not capped; ungated = unbounded.
       const capacity = this.isFlushAllowed() ? Infinity : MAX_GATED_BUFFER_EVENTS;
-      const added = this.pending.add(outgoing, outgoing.type === event.type ? dedup : undefined, capacity);
-      if (added === null) return;
+      const size = this.pending.add(outgoing, outgoing.type === event.type ? dedup : undefined, capacity);
+      if (size === null) return;
 
-      // A merged event counts toward batchSize by its occurrences, so an error
-      // loop is still sent every batchSize occurrences and a crash loses no more
-      // of it than before merging. It asks for a send each time it reaches
-      // another batchSize, not on every repeat past it: while sends are held
-      // (before presence, or with no cluster) a loop would otherwise re-arm the
-      // heartbeat on every occurrence.
+      // batchSize counts the events to be sent, and a merged error is one
+      // however many times it repeats: a loop alone never fills a batch, and
+      // goes out with the batch (heartbeat, other events filling it, or a
+      // lifecycle flush).
       const batchSize = resolveBatchSize(this.config.getConfig()?.options?.transport?.batchSize);
-      const due = added.merged
-        ? added.size % Math.max(batchSize, 1) === 0
-        : added.size >= batchSize;
-      if (due && !this.eventsToSkipFlush.includes(outgoing.type)) {
+      if (size >= batchSize && !this.eventsToSkipFlush.includes(outgoing.type)) {
         this.flush();
       }
     } catch (error) {

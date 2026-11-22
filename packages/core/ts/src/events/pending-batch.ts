@@ -8,13 +8,6 @@ interface Repeat {
   countAttribute: string;
 }
 
-/** What `add` did: buffered a new event, or counted a repeat on a buffered one. */
-export interface Added {
-  /** The buffer's length after a new event; a merged event's occurrences after a repeat. */
-  size: number;
-  merged: boolean;
-}
-
 /**
  * The events waiting to be sent, with repeats merged: an event whose `dedup`
  * key matches one already here is counted on that one instead of buffered
@@ -35,20 +28,24 @@ export class PendingBatch<E extends BaseEvent<string>> {
   constructor(private readonly readOptions: () => ErrorDeduplicationOptions | boolean | undefined) {}
 
   /**
-   * Buffers `event`, or counts it on the event it repeats. Null when the buffer
-   * is at `capacity`; a repeat takes no slot, so it is counted even then.
+   * Buffers `event`, or counts it on the event it repeats, and returns the
+   * number of events to be sent: a repeat adds none. Null when the buffer is
+   * at `capacity`; a repeat takes no slot, so it is counted even then.
    */
-  add(event: E, dedup: DedupInfo | undefined, capacity: number): Added | null {
+  add(event: E, dedup: DedupInfo | undefined, capacity: number): number | null {
     const merging = dedup && this.isEnabled() ? dedup : undefined;
     const repeat = merging && this.repeats.get(merging.key);
-    if (repeat) return { size: ++repeat.count, merged: true };
+    if (repeat) {
+      repeat.count++;
+      return this.events.length;
+    }
 
     if (this.events.length >= capacity) return null;
     const size = this.events.push(event);
     if (merging) {
       this.repeats.set(merging.key, { index: size - 1, count: 1, countAttribute: merging.countAttribute });
     }
-    return { size, merged: false };
+    return size;
   }
 
   /**

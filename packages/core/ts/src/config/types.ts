@@ -103,7 +103,10 @@ export interface TracingOptions {
 
 /** Batching and delivery of outgoing event batches. */
 export interface TransportOptions {
-  /** Max events buffered before a batch is flushed (default 10). */
+  /**
+   * Max events buffered before a batch is flushed (default 10). A merged error
+   * (see {@link ErrorDeduplicationOptions}) is one event, however often it repeated.
+   */
   batchSize?: number;
   /** Max ms a batch waits before flushing regardless of size (default 10000). */
   batchTimeout?: number;
@@ -117,7 +120,9 @@ export interface TransportOptions {
  * already waiting to be sent is counted on that event (`error_repeat_count` /
  * `log_repeat_count`, the occurrences it stands for) instead of sent again, so a
  * batch carries one event per distinct error, with the first occurrence's
- * context. A batch is still sent every `transport.batchSize` occurrences.
+ * context. A merged event counts as one toward `transport.batchSize`, so a
+ * loop alone doesn't fill a batch: it goes out with the batch, on
+ * `transport.batchTimeout`, when other events fill it, or on a lifecycle flush.
  * "The same" means the same page or screen, and for an exception the same type,
  * message (first 400 characters, after redaction), handled flag and stack; for a
  * log, the same message.

@@ -196,10 +196,11 @@ count of an error is the sum of the field over its events.
 - **A merged event keeps the first occurrence's context**: its timestamp, ids, metadata and anything
   a hook added. Later occurrences add only to the count. The same error on another page
   is never merged, so each keeps its own event.
-- **How much it saves**: at most one event per error per batch. A batch is still sent once an error
-  reaches `transport.batchSize` occurrences, so an error loop is sent as often as before, and a
-  crash loses no more of it, but as one event per batch instead of one per occurrence: 1,000
-  occurrences with the default `batchSize` of 10 are 100 events.
+- **How much it saves**: at most one event per error per batch. A merged event counts as one toward
+  `transport.batchSize`, however often it repeats, so a loop alone doesn't fill a batch: it is sent
+  with the batch, when `transport.batchTimeout` passes, other events fill it, or the page is hidden.
+  A loop that runs for a minute while nothing else is captured is 6 events at the default 10-second
+  `batchTimeout`, however many times it throws.
 - **Hooks** still see every occurrence: `beforeSend` and `enrichEvent` run first, an occurrence
   `beforeSend` drops isn't counted, and the count is set on a copy when the batch is sent, so the
   hooks never see `error_repeat_count` or `log_repeat_count`. Which events are the same is decided
@@ -483,7 +484,7 @@ flowchart TD
 4. **`beforeSend(event)`** — your hook; return `false` to **drop** the event. Receives the fully-redacted, enriched event.
 5. **`enrichEvent(event)`** — your hook; mutate or replace the event before it’s buffered.
 6. **Deduplicate (exceptions and error-level logs)** — a repeat of one already in the current batch is counted instead of buffered again; see [`options.errors`](#optionserrors).
-7. **Batch** — buffered in the events pool, flushed at `transport.batchSize` (a merged error counts its occurrences) or `transport.batchTimeout`.
+7. **Batch** — buffered in the events pool, flushed at `transport.batchSize` (a merged error counts once) or `transport.batchTimeout`.
 8. **Send** — gzipped (`transport.compression`) and delivered to intake.
 
 Supporting pieces:
