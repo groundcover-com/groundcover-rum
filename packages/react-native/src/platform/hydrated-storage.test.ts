@@ -121,10 +121,15 @@ describe("HydratedStorage", () => {
   });
 
   it("falls back to memory-only when the backend has neither multiGet nor getMany", async () => {
-    const setItem = vi.fn(async () => {});
+    // Resolves when the mirrored write reaches the backend, so the test waits
+    // for that call itself rather than for a timer.
+    let mirrored!: (write: [string, string]) => void;
+    const mirroredWrite = new Promise<[string, string]>((resolve) => {
+      mirrored = resolve;
+    });
     const unknown = {
       getAllKeys: async () => [PREFIXED],
-      setItem,
+      setItem: async (key: string, value: string) => mirrored([key, value]),
       removeItem: async () => {},
     };
     const storage = await HydratedStorage.hydrate(unknown);
@@ -132,8 +137,7 @@ describe("HydratedStorage", () => {
     // Still usable: writes go to the cache and keep mirroring to the backend.
     storage.setItem(KEY, "memory");
     expect(storage.getItem(KEY)).toBe("memory");
-    await new Promise((r) => setTimeout(r, 0));
-    expect(setItem).toHaveBeenCalledWith(PREFIXED, "memory");
+    await expect(mirroredWrite).resolves.toEqual([PREFIXED, "memory"]);
   });
 
   it("serializes mirrored backend writes so a setItem→removeItem can't resurrect deleted state", async () => {

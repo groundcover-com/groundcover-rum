@@ -25,13 +25,15 @@
 //     node_modules would be inlined.
 //   - `optionalRequires`, a tsup plugin, turns each `__require("<id>")` back into
 //     `require("<id>")` before Rollup and terser run, which lets Rollup drop the
-//     unused shim. After the files are written, it fails the build unless every
-//     id is required literally, directly in a try block, and no shim is left (a
-//     require of anything else would still go through it).
+//     unused shim. After the files are written, it parses them and fails the
+//     build unless every id is required literally, in a spot Metro treats as
+//     optional, and no shim is left (a require of anything else would still go
+//     through it).
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 
 const pkgRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 const SOURCE = "src/platform/optional-modules.ts";
@@ -81,6 +83,47 @@ export const noInlinedNodeModules = {
 const callLoading = (id) =>
   new RegExp(`(?<![\\w$.])(?:__require\\d*|require)\\((["'\`])${escapeRegExp(id)}\\1\\)`, "g");
 
+/** Every `require("…")` call in `code`, parsed, so strings and comments don't count. */
+function literalRequires(code, file) {
+  const calls = [];
+  const visit = (node) => {
+    if (
+      ts.isCallExpression(node) &&
+      ts.isIdentifier(node.expression) &&
+      node.expression.text === "require" &&
+      node.arguments.length === 1 &&
+      ts.isStringLiteralLike(node.arguments[0])
+    ) {
+      calls.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile(file, code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS));
+  return calls;
+}
+
+const isStatement = (node) =>
+  (node.kind >= ts.SyntaxKind.FirstStatement && node.kind <= ts.SyntaxKind.LastStatement) ||
+  ts.isFunctionDeclaration(node) ||
+  ts.isClassDeclaration(node);
+
+/**
+ * Metro's rule (isOptionalDependency in metro/src/ModuleGraph/worker/collectDependencies.js):
+ * walking up from the require, the first block must be a try statement's `try`
+ * block, reached through at most two other statements. Object literals and
+ * blocks that closed before the require don't count.
+ */
+function isOptionalForMetro(call) {
+  let statements = 0;
+  for (let node = call; node && statements < 3; node = node.parent) {
+    if (ts.isBlock(node)) {
+      return ts.isTryStatement(node.parent) && node.parent.tryBlock === node;
+    }
+    if (isStatement(node)) statements += 1;
+  }
+  return false;
+}
+
 /** Throws unless `code` (a written bundle) loads every optional peer the way Metro needs. */
 export function checkOptionalRequires(code, file) {
   const fail = (message) => {
@@ -93,15 +136,13 @@ export function checkOptionalRequires(code, file) {
         `${OPTIONAL_REQUIRES.join(", ")}; restart tsup so it re-reads them`
     );
   }
+  const requires = literalRequires(code, file);
   for (const id of OPTIONAL_REQUIRES) {
-    const literal = new RegExp(`(?<![\\w$.])require\\((["'])${escapeRegExp(id)}\\1\\)`, "g");
-    const calls = [...code.matchAll(literal)];
+    const calls = requires.filter((call) => call.arguments[0].text === id);
     if (calls.length !== 1) {
       fail(`expected one literal require("${id}"), found ${calls.length}`);
     }
-    // Directly in a try block: an unclosed `try {` before it, with no brace in between.
-    const before = code.slice(Math.max(0, calls[0].index - 400), calls[0].index);
-    if (!/\btry\s*\{[^{}]*$/.test(before)) {
+    if (!isOptionalForMetro(calls[0])) {
       fail(
         `require("${id}") is not directly inside a try block, so Metro would make it a ` +
           "required dependency and apps without it would fail to bundle"
