@@ -15,7 +15,7 @@ each package's README is that SDK's reference.
 | Package | Platform | Path | Registry | Version | Status |
 | --- | --- | --- | --- | --- | --- |
 | [`@groundcover/browser`](packages/browser) | Web | `packages/browser` | npm (`rc` tag: 2.3.0-rc.0) | 2.2.3 | Stable |
-| [`@groundcover/react-native`](packages/react-native) | React Native (iOS, Android) | `packages/react-native` | npm, `rc` tag | 0.0.1-rc.9 | Release candidate |
+| [`@groundcover/react-native`](packages/react-native) | React Native (iOS, Android) | `packages/react-native` | npm, `rc` tag | 0.0.1-rc.10 | Release candidate |
 | [`groundcover_rum`](packages/flutter) | Flutter (iOS, Android) | `packages/flutter` | pub.dev | 0.0.1-rc.4 | Release candidate |
 | [`GroundcoverRum`](packages/ios) | iOS (Swift, Objective-C) | `packages/ios` | Swift Package Manager | 0.0.1-rc.3 | Release candidate |
 | [`rum-android`](packages/android) (+ `-compose`, `-okhttp`, `-timber`) | Android (Kotlin, Java) | `packages/android` | Maven Central | 0.0.1-rc.3 | Release candidate |

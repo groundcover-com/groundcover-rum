@@ -11,12 +11,16 @@ import { safeWarn } from "../internal/safe-warn";
 const KEY_PREFIX = "@groundcover:";
 const HYDRATION_TIMEOUT_MS = 3000;
 
+// The batch read differs by AsyncStorage major: 1.x/2.x have `multiGet`, 3.x
+// replaced it with `getMany`. A backend needs one of the two; hydrate() uses
+// whichever it finds.
 export interface AsyncStorageLike {
   getAllKeys(): Promise<readonly string[]>;
   // `readonly` matches @react-native-async-storage's own `Promise<readonly
   // KeyValuePair[]>` return — the SDK only reads the result, so a mutable slot
   // would (wrongly) reject the real AsyncStorage under strict tsc.
-  multiGet(keys: string[]): Promise<ReadonlyArray<[string, string | null]>>;
+  multiGet?(keys: string[]): Promise<ReadonlyArray<[string, string | null]>>;
+  getMany?(keys: string[]): Promise<Readonly<Record<string, string | null>>>;
   setItem(key: string, value: string): Promise<void>;
   removeItem(key: string): Promise<void>;
 }
@@ -109,7 +113,7 @@ export class HydratedStorage implements PlatformStorage {
           const keys = await backend.getAllKeys();
           const ours = keys.filter((k) => k.startsWith(KEY_PREFIX));
           if (ours.length === 0) return;
-          const entries = await backend.multiGet(ours);
+          const entries = await readEntries(backend, ours);
           if (!settled) storage.seed(entries);
         })(),
         HYDRATION_TIMEOUT_MS
@@ -123,6 +127,19 @@ export class HydratedStorage implements PlatformStorage {
     }
     return new SafeStorage(storage);
   }
+}
+
+// Reads `keys` as [key, value] pairs through whichever batch read the backend has.
+async function readEntries(
+  backend: AsyncStorageLike,
+  keys: string[]
+): Promise<ReadonlyArray<[string, string | null]>> {
+  if (typeof backend.multiGet === "function") return backend.multiGet(keys);
+  if (typeof backend.getMany === "function") {
+    const values = await backend.getMany(keys);
+    return keys.map((key) => [key, values[key] ?? null]);
+  }
+  throw new Error("AsyncStorage backend has neither multiGet nor getMany");
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {

@@ -1,4 +1,9 @@
 import { defineConfig } from "tsup";
+import {
+  OPTIONAL_REQUIRES,
+  noInlinedNodeModules,
+  optionalRequires,
+} from "./scripts/optional-requires.mjs";
 
 export default defineConfig({
   entry: ["src/index.ts"],
@@ -31,15 +36,25 @@ export default defineConfig({
   // copy of `react/jsx-runtime` would be a private second module — the text-input
   // instrumentation patches those exports and would silently instrument nothing
   // but itself.
+  //
+  // OPTIONAL_REQUIRES are the ids src/platform/optional-modules.ts loads with a
+  // guarded require (AsyncStorage, expo-constants, RN's promise rejection
+  // tracking). They must stay literal `require("…")` calls for Metro to link
+  // them, which tsup doesn't do on its own: see scripts/optional-requires.mjs.
   external: [
     "react",
     "react/jsx-runtime",
     "react/jsx-dev-runtime",
     "react-native",
-    "@react-native-async-storage/async-storage",
     "@react-navigation/native",
+    ...OPTIONAL_REQUIRES,
   ],
   noExternal: ["@groundcover/rum-core"],
+  // Fails the build if anything from node_modules would be inlined.
+  esbuildPlugins: [noInlinedNodeModules],
+  // Restores the literal requires before Rollup and terser, then checks every
+  // written file (watch rebuilds included).
+  plugins: [optionalRequires],
   treeshake: true,
   tsconfig: "./tsconfig.json",
 });
