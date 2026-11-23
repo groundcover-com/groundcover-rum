@@ -197,8 +197,26 @@ jobs:
     if: ${{ needs.changes.outputs.web == 'true' }}
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 20
-    # Three, and not more. Each shard pays a fixed cost (setup, cached
-    # browsers, build) against its slice of the tests. Past three, wall
+    # Inside Microsoft's Playwright image, which ships all three browsers AND
+    # the OS packages they link against. Before it, every shard ran
+    # `playwright install-deps` on a fresh VM: 175 apt packages, 132 MB, from
+    # archive.ubuntu.com, every run. No cache could cover that, since apt
+    # installs into the system, and the mirror is the weak link: usually
+    # ~4 MB/s and under a minute, but intermittently 200-600 KB/s, which
+    # stretched the step to 4-12 minutes and, at worst, past this job's
+    # timeout on all three shards at once. A registry pull replaces it.
+    #
+    # The tag moves with @playwright/test in pnpm-lock.yaml: an image's browsers
+    # are the builds of one Playwright version. Bump them in the same PR. If
+    # they drift, Playwright fails on the missing browser and names the image
+    # tag it needs.
+    container:
+      image: mcr.microsoft.com/playwright:v1.63.0-noble
+    env:
+      # The browsers are already in the image, under its PLAYWRIGHT_BROWSERS_PATH.
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    # Three, and not more. Each shard pays a fixed cost (container, setup,
+    # build) against its slice of the tests. Past three, wall
     # clock flattens while runner time keeps climbing, because every extra
     # shard re-pays the whole fixed cost.
     #
@@ -235,18 +253,34 @@ jobs:
         id: pnpm-store
         run: echo "dir=$(pnpm store path --silent)" >> "$GITHUB_OUTPUT"
 
+      # Its own entry, not the `Linux-pnpm-` store that Core CI saves from main.
+      # actions/cache matches an entry on its path as well as its key, and in
+      # the container the store resolves under the container's HOME rather
+      # than the runner's, so that entry can never restore here. Saved below.
       - name: Restore pnpm store
+        id: pnpm-cache
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.pnpm-store.outputs.dir }}
-          key: ${{ runner.os }}-pnpm-${{ hashFiles('pnpm-lock.yaml') }}
-          restore-keys: ${{ runner.os }}-pnpm-
+          key: ${{ runner.os }}-pnpm-playwright-image-${{ hashFiles('pnpm-lock.yaml') }}
+          restore-keys: ${{ runner.os }}-pnpm-playwright-image-
 
       - run: pnpm install --frozen-lockfile
 
-      # Resolved from the installed package rather than package.json's `^1.51.1`
-      # range: the cache key and the `report` job both need the version actually
-      # on disk, not the one a range might resolve to next week.
+      # Main-only and one shard, for the quota reason core.yml gives: cache
+      # writes are branch-scoped, so a save from every PR branch is a duplicate
+      # store per branch. This entry takes the slot of the browser cache the
+      # image made redundant.
+      - name: Save pnpm store
+        if: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 && steps.pnpm-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ steps.pnpm-store.outputs.dir }}
+          key: ${{ runner.os }}-pnpm-playwright-image-${{ hashFiles('pnpm-lock.yaml') }}
+
+      # Resolved from the installed package rather than package.json's caret
+      # range: the `report` job needs the version actually on disk, not the one
+      # a range might resolve to next week.
       #
       # Validated as single-line semver, and validated in node rather than the
       # shell so no quoting is involved. The value comes out of node_modules,
@@ -273,37 +307,6 @@ jobs:
             require("fs").appendFileSync(process.env.GITHUB_OUTPUT, "version=" + v + "\n");
           '
 
-      # No restore-keys: a browser directory restored from a DIFFERENT Playwright
-      # version is worse than an empty one, because `playwright install` would
-      # consider it satisfied and the suite would launch mismatched binaries.
-      # Exact key or nothing.
-      - name: Restore Playwright browsers
-        id: pw-cache
-        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
-
-      # The browser binaries cache; the apt packages they link against do not and
-      # cannot, so `install-deps` runs either way. What the cache buys is the
-      # binary download.
-      - name: Install Playwright browsers + OS deps (cache miss)
-        if: ${{ steps.pw-cache.outputs.cache-hit != 'true' }}
-        run: npx playwright install --with-deps
-
-      - name: Install Playwright OS deps (cache hit)
-        if: ${{ steps.pw-cache.outputs.cache-hit == 'true' }}
-        run: npx playwright install-deps
-
-      # Main-only and one-shard, same quota reason as the pnpm store — three
-      # browsers make a large entry, and cache writes are branch-scoped.
-      - name: Save Playwright browsers
-        if: ${{ github.ref == 'refs/heads/main' && matrix.shard == 1 && steps.pw-cache.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ~/.cache/ms-playwright
-          key: ${{ runner.os }}-playwright-${{ steps.pw.outputs.version }}
-
       # The root `e2e` script (`pnpm run build && playwright test`) as two steps,
       # so the Actions UI attributes build and test time separately instead of
       # hiding both inside one step. The script remains the local
@@ -328,7 +331,13 @@ jobs:
       # Note the config's retries (2) and maxFailures (2) apply PER SHARD, so
       # the suite tolerates up to six failures before bailing out. Accepted
       # deliberately as the price of sharding.
+      #
+      # HOME=/root for Firefox. The container runs as root, but Actions points
+      # HOME at /github/home, which belongs to the runner's user, and Firefox
+      # refuses to run as root in another user's home directory.
       - name: Run E2E tests (shard ${{ matrix.shard }}/3)
+        env:
+          HOME: /root
         run: npx playwright test tests/e2e/playground --shard=${{ matrix.shard }}/${{ strategy.job-total }} --reporter=blob,list
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
