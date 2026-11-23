@@ -111,7 +111,7 @@ each SDK instance, and `0.0.1-rc.2` matches `tracing.propagationUrls` against th
 These are breaking changes from `0.0.1-rc.0`:
 
 ```bash
-npm install @groundcover/react-native@0.0.1-rc.9
+npm install @groundcover/react-native@0.0.1-rc.10
 ```
 
 | Change | Migration |
@@ -313,9 +313,12 @@ Both hooks receive the already-redacted, enriched event.
 `appVersion` / `appBuild` are stamped onto session attributes (`app.version` /
 `app.build`; `app.id` comes from `appId`). Explicit values take precedence. When
 either is omitted, the SDK reads it from **`expo-constants`** if that module is
-installed (`expoConfig.version`, `ios.buildNumber`, `android.versionCode`). On bare
-React Native (no `expo-constants`), pass `appVersion` / `appBuild` explicitly to
-stamp them:
+installed (`expoConfig.version`, `ios.buildNumber`, `android.versionCode`). The
+SDK loads your app's copy, so the bundler has to be able to reach it from the
+SDK. If your package manager only exposes declared dependencies (for example
+pnpm with `hoist=false`), list `expo-constants` in your app's dependencies. On
+bare React Native (no `expo-constants`), pass `appVersion` / `appBuild` explicitly
+to stamp them:
 
 ```ts
 options: { appVersion: "1.4.0", appBuild: "142" }
@@ -1178,7 +1181,9 @@ path:
 
 2. **Auto-detect** — omit `storage` and the SDK attempts to `require` the peer
    itself. Convenient for a plain single-package app; fragile in monorepos (see
-   above).
+   above). If your Metro config turns `allowOptionalDependencies` off (the
+   default React Native 0.74+ and Expo SDK 51+ configs have it on), every
+   optional module the SDK loads must be installed, or the bundle fails.
 
 3. **Memory-only degrade** — if the peer is absent, hydration fails, or it exceeds
    the 3s hydration budget, the SDK runs **memory-only**: telemetry works

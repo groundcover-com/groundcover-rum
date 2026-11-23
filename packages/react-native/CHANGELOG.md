@@ -4,6 +4,47 @@ All notable changes to `@groundcover/react-native` are documented here. This pro
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.0.1-rc.10] — 2026-11-23
+
+Eleventh release candidate. No API changes from `0.0.1-rc.9`, but two packaging changes can need
+action: `expo-constants` now comes from your app instead of a copy inside the SDK, and the
+optional modules rely on Metro's `allowOptionalDependencies`. See Changed and Notes.
+
+### Fixed
+
+- **AsyncStorage is picked up without passing `storage`.** When `init()` gets no `storage`, the SDK
+  now loads `@react-native-async-storage/async-storage` from your app, so a session continues across
+  app restarts. Before, the published bundle looked the module up in a way Metro couldn't link, so
+  the SDK always fell back to memory-only storage and started a fresh session on every launch.
+  Passing `storage` explicitly works as before.
+- **Sessions persist with AsyncStorage 3.x.** AsyncStorage 3 replaced `multiGet` with `getMany`, so
+  the SDK couldn't read its saved state back and started a fresh session on every launch, whether
+  AsyncStorage was passed in or picked up. It now reads with whichever of the two your version has.
+- **Unhandled promise rejections are captured on JavaScriptCore.** Rejection tracking now hooks
+  React Native's own Promise. Before, it was enabled on a private copy of the Promise library
+  bundled into the SDK, so rejections from your app's promises were missed. Hermes, the default
+  engine, is unchanged.
+
+### Changed
+
+- **`expo-constants` comes from your app instead of a copy inside the SDK.** The published bundle no
+  longer carries its own copy of the expo-constants and expo-modules-core JavaScript, so it is about
+  8 KB smaller and always matches your app's Expo version. When you don't pass `appVersion` /
+  `appBuild`, they are still read from `expo-constants`. If your package manager only exposes
+  declared dependencies (for example pnpm with `hoist=false`), add `expo-constants` to your app's
+  dependencies or pass `appVersion` / `appBuild`; otherwise they are left empty.
+- **On JavaScriptCore, the SDK's rejection tracker replaces React Native's development warning.**
+  Once the SDK starts, unhandled promise rejections in a development build are reported to
+  groundcover instead of showing React Native's "Possible Unhandled Promise Rejection" warning, and
+  `destroy()` doesn't bring the warning back. Hermes is unchanged.
+
+### Notes
+
+- **Optional modules rely on Metro's `allowOptionalDependencies`.** The default Metro configs turn
+  it on (React Native 0.74+ and Expo SDK 51+). With a custom Metro config that turns it off, every
+  optional module the SDK loads must be resolvable from your app — AsyncStorage, `expo-constants`,
+  and React Native's `promise` package — or the bundle fails.
+
 ## [0.0.1-rc.9] — 2026-11-19
 
 Tenth release candidate. No breaking changes from `0.0.1-rc.8`; repeated identical errors are now
