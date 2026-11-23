@@ -286,8 +286,8 @@ export type NativeSignalKind = NativeSignal["kind"];
 export type GroundcoverNativeModule = {
   nativeInit(configJson: string): Promise<string>;
   updateSessionSnapshot(snapshotJson: string | null): void;
-  /** JSON array of `PendingCrashRecord`. Read-only — records survive until acked. */
   writePendingCrashReport?(id: string, json: string): boolean;
+  /** Reads pending native crashes and fatal JS errors as a JSON array. Records survive until acked. */
   getPendingCrashReports(): Promise<string>;
   clearPendingCrashReports(ids: string[]): Promise<void>;
   /**
