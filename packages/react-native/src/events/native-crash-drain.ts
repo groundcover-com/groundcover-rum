@@ -7,12 +7,13 @@ import {
   Transporter,
   truncate,
   type ConfigManager,
+  type BaseEvent,
   type ErrorEventAttributes,
   type IdGenerator,
 } from "@groundcover/rum-core";
 
 import type { RNEventType } from "./rn-event-types";
-import type { GroundcoverNativeModule, PendingCrashRecord } from "../platform/native-types";
+import type { GroundcoverNativeModule, PendingCrashRecord, PendingJsFatal } from "../platform/native-types";
 import { clearPendingCrashReports, readPendingCrashReports } from "../platform/native-bridge";
 import type { SessionSnapshot } from "../platform/session-snapshot";
 import { createRnBatchSender, RN_SEND_TIMEOUT_MS } from "../internal/rn-batch-sender";
@@ -78,7 +79,10 @@ async function runDrain(deps: DrainDeps): Promise<void> {
   for (const record of records) {
     try {
       const acked = await reportOne(record, deps);
-      if (acked) await clearPendingCrashReports(deps.native, [record.id]);
+      if (acked) {
+        const id = "jsFatalId" in record ? record.jsFatalId : record.id;
+        await clearPendingCrashReports(deps.native, [id]);
+      }
     } catch (error) {
       // Leave the record un-acked: whatever went wrong here, the next launch
       // gets another attempt.
@@ -92,7 +96,7 @@ async function runDrain(deps: DrainDeps): Promise<void> {
 }
 
 /** @returns whether the record should be acked (delivered, or unsalvageable). */
-async function reportOne(record: PendingCrashRecord, deps: DrainDeps): Promise<boolean> {
+async function reportOne(record: PendingCrashRecord | PendingJsFatal, deps: DrainDeps): Promise<boolean> {
   const snapshot = parseSnapshot(record.sessionSnapshotJson);
   if (!snapshot) {
     // No envelope means no session to attribute this to. Sending it under the
@@ -102,6 +106,11 @@ async function reportOne(record: PendingCrashRecord, deps: DrainDeps): Promise<b
   }
 
   const { screen, ...sessionAttributes } = snapshot;
+
+  if ("jsFatalId" in record) {
+    if (!isUsableEvent(record.event)) return true;
+    return sendUnderSnapshot({ deps, sessionAttributes, event: record.event as BaseEvent });
+  }
 
   // A local enricher so the crash-time screen is stamped nested (like every
   // other event's `screen`), rather than dot-flattened as a plain attribute.

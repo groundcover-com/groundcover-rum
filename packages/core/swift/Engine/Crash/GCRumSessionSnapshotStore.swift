@@ -59,7 +59,7 @@ final class GCRumSessionSnapshotStore {
         directory: URL? = nil,
         writeSnapshot: ((String, URL) -> Void)? = nil
     ) {
-        self.writeSnapshot = writeSnapshot ?? Self.writeAtomically
+        self.writeSnapshot = writeSnapshot ?? { _ = Self.writeAtomically($0, to: $1) }
         let base = directory ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)
             .first!
@@ -193,13 +193,14 @@ final class GCRumSessionSnapshotStore {
         writeSnapshot(json, snapshotURL)
     }
 
-    func writePendingRecord(id: String, json: String) {
+    @discardableResult
+    func writePendingRecord(id: String, json: String) -> Bool {
         // Same guard as the ack path: the id is interpolated into a path. Refusing here also
         // means an id that could never be acked can never be written, so the two halves cannot
         // disagree and strand a record nothing is able to delete.
-        guard Self.isSafeRecordId(id) else { return }
+        guard Self.isSafeRecordId(id) else { return false }
         enforceRecordCap()
-        Self.writeAtomically(json, to: pendingDir.appendingPathComponent("\(id).json"))
+        return Self.writeAtomically(json, to: pendingDir.appendingPathComponent("\(id).json"))
     }
 
     func readPendingRecords() -> [String] {
@@ -282,16 +283,18 @@ final class GCRumSessionSnapshotStore {
 
     /// `static` so it can be the default for [writeSnapshot]: it touches no instance state,
     /// only its arguments.
-    private static func writeAtomically(_ contents: String, to target: URL) {
+    private static func writeAtomically(_ contents: String, to target: URL) -> Bool {
         // `.atomic` writes a temp file and replaces, so a crash mid-write leaves the
         // previous contents. The protection class rides on the WRITE rather than the
         // directory, because the replacement inode inherits nothing from the old one.
         //
         // …UntilFirstUserAuthentication, not `.complete`: under `.complete` a write fails
         // while the device is locked, which is exactly when the background flush runs.
-        try? Data(contents.utf8).write(
-            to: target,
-            options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
-        )
+        do {
+            try Data(contents.utf8).write(to: target, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            return true
+        } catch {
+            return false
+        }
     }
 }

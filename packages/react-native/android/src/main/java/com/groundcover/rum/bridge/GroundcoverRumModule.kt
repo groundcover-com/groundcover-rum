@@ -21,8 +21,7 @@ import com.groundcover.rum.engine.GcRumEngineStatus
  * Thin adapter: JSON in, JSON out, engine in the middle. No capture logic here, so the engine
  * stays usable without React Native.
  *
- * A classic NativeModule rather than a TurboModule: every call is init-time or fire-and-forget,
- * and the interop layer our >= 0.74 peer guarantees makes codegen pure overhead.
+ * RN interop exposes this classic module on both architectures.
  */
 class GroundcoverRumModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
@@ -63,6 +62,10 @@ class GroundcoverRumModule(reactContext: ReactApplicationContext) :
     fun updateSessionSnapshot(snapshotJson: String?) {
         runCatching { engine.updateSessionSnapshot(snapshotJson) }
     }
+
+    @ReactMethod(isBlockingSynchronousMethod = true)
+    fun writePendingCrashReport(id: String, json: String): Boolean =
+        runCatching { engine.writePendingCrashReport(id, json) }.getOrDefault(false)
 
     @ReactMethod
     fun getPendingCrashReports(promise: Promise) {

@@ -352,8 +352,8 @@ export class RNSessionManager {
    * ship. Each report goes under the envelope native persisted at crash time.
    *
    * Regardless of `enabledEvents` too, for the same reason one gate up: config gates CAPTURE, not
-   * delivery. A pending record can only exist because a launch with `crashes` enabled wrote it, so
-   * every one was captured under consent; turning the feature off means stop capturing, and
+   * delivery. Native crashes and JS fatals were gated by their respective capture settings.
+   * Turning a feature off means stop capturing, and
    * refusing to ship what is already on disk would make a config change silently lose a fatal —
    * it would sit there until the record cap evicted it. Capture stays off: `armNative` still sends
    * `crashes: false`, so no handler is installed for a host that opted out.
@@ -427,6 +427,10 @@ export class RNSessionManager {
 
   sendCustomEvent(event: { event: string; attributes: Record<string, unknown> }): void {
     this.core?.instrumentation.sendCustomEvent(event);
+  }
+
+  captureStartupFatal(error: unknown, atMs: number): void {
+    this.core?.instrumentation.captureStartupFatal(error, atMs);
   }
 
   captureException(error: unknown, metadata?: Record<string, unknown>): void {

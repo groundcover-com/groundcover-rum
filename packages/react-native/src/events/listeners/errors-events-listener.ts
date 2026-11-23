@@ -3,10 +3,16 @@ import {
   coerceToError,
   handleError,
   shapeErrorEvent,
+  msToNs,
+  type ListenerDeps,
+  type BaseEvent,
   type EnrichedEvent,
   type ErrorCaptureOptions,
   type CoreEventType,
 } from "@groundcover/rum-core";
+import { observeGlobalErrors } from "../../platform/global-errors";
+import { reportSafely } from "../../internal/report-safely";
+import type { GroundcoverNativeModule, PendingJsFatal } from "../../platform/native-types";
 import type { RNExtraEventType } from "../rn-event-types";
 import { loadRejectionTracking } from "../../platform/optional-modules";
 
@@ -21,15 +27,6 @@ import { loadRejectionTracking } from "../../platform/optional-modules";
 // Version-fragile, like fiber-walk: every access is guarded, the handlers are idempotent
 // and best-effort restorable, and any failure degrades to "no error capture".
 
-type GlobalErrorHandler = (error: unknown, isFatal?: boolean) => void;
-
-// The subset of RN's global ErrorUtils we use, typed structurally so the SDK
-// never hard-depends on react-native's ambient globals.
-type ErrorUtilsLike = {
-  getGlobalHandler?: () => GlobalErrorHandler | undefined;
-  setGlobalHandler?: (handler: GlobalErrorHandler) => void;
-};
-
 // The engine rejection tracker's shape (same options object on Hermes' native
 // tracker and the JSC `promise` polyfill module).
 type RejectionOptions = {
@@ -40,21 +37,16 @@ type RejectionOptions = {
 type HermesWithRejection = { enablePromiseRejectionTracker?: (options: RejectionOptions) => void };
 type RejectionTrackingModule = { enable?: (options: RejectionOptions) => void; disable?: () => void };
 
-function getErrorUtils(): ErrorUtilsLike | null {
-  try {
-    const eu = (globalThis as { ErrorUtils?: ErrorUtilsLike }).ErrorUtils;
-    return eu && typeof eu === "object" ? eu : null;
-  } catch {
-    return null;
-  }
-}
-
 export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
-  // The previous global handler, restored on destroy. `wrapped` is the handler
-  // we installed, so destroy only restores when we are STILL the current handler
-  // (mirrors the network/console guarded-restore discipline).
-  private previousHandler: GlobalErrorHandler | undefined;
-  private wrapped: GlobalErrorHandler | null = null;
+  private stopObserving?: () => void;
+
+  constructor(
+    deps: ListenerDeps<RNExtraEventType>,
+    private readonly native?: Pick<GroundcoverNativeModule, "writePendingCrashReport"> | null
+  ) {
+    super(deps);
+  }
+
   // Rejection tracking is a SEPARATE engine hook from ErrorUtils; track its own
   // install state. `rejectionModule` is set only on the JSC path (it exposes a
   // disable()); Hermes' native tracker has no un-set (single slot, no restore).
@@ -66,50 +58,43 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
   private active = true;
 
   initialize(): void {
-    this.installGlobalHandler();
+    this.stopObserving ??= observeGlobalErrors((error, fatal) => {
+      if (fatal) this.captureFatal(error, Date.now());
+      else this.handleEvent(error, { handled: false });
+    });
     this.installRejectionTracking();
   }
 
-  private installGlobalHandler(): void {
-    // Idempotent (per the contract above): if we already installed our wrapper,
-    // a second initialize() must NOT re-capture it as `previousHandler` — that
-    // would make destroy() restore our own wrapper and drop the host's handler.
-    if (this.wrapped) return;
-    const eu = getErrorUtils();
-    // Only take over the global handler if we can also CAPTURE the previous one —
-    // otherwise destroy() can't restore it and uncaught errors would stop
-    // reaching the host redbox/crash path. Both must be functions.
-    if (typeof eu?.setGlobalHandler !== "function" || typeof eu?.getGlobalHandler !== "function") {
-      return;
-    }
+  captureFatal(error: unknown, atMs: number): void {
     try {
-      this.previousHandler = eu.getGlobalHandler?.();
-      const wrapped: GlobalErrorHandler = (error, isFatal) => {
-        // Capture first (guarded), then always chain the previous handler so the
-        // host's crash/redbox behavior is untouched even if we throw.
-        try {
-          this.handleEvent(error, { handled: false });
-        } catch (e) {
-          handleError(e);
-        }
-        // A FATAL JS error tears the process down before the pool's heartbeat /
-        // size-triggered flush can fire, so the crash would be queued and lost.
-        // Force a best-effort lifecycle flush (inline encode — the same
-        // "going away" path AppState-background uses). Guarded so it can never
-        // block chaining the host handler below.
-        if (isFatal) {
-          try {
-            this.eventsPool.flush({ lifecycle: true });
-          } catch (e) {
-            handleError(e);
-          }
-        }
-        this.previousHandler?.(error, isFatal);
+      const event = this.buildEvent(coerceToError(error), { handled: false, scrubDiagnostics: true }, msToNs(atMs));
+      const id = event.id;
+      event.attributes = {
+        ...event.attributes,
+        "error_metadata.fatal": true,
+        "error_metadata.native": false,
+        "error_metadata.crash_report_id": id,
       };
-      this.wrapped = wrapped;
-      eu.setGlobalHandler(wrapped);
-    } catch (error) {
-      handleError(error);
+      this.eventsPool.addEvent(event, accepted => this.persistFatal(id, accepted));
+    } finally {
+      this.eventsPool.flush({ lifecycle: true });
+    }
+  }
+
+  private persistFatal(id: string, event: BaseEvent): boolean {
+    try {
+      if (!this.native?.writePendingCrashReport) return false;
+      const session = this.eventsPool.getSessionAttributes();
+      if (!session.session_id) return false;
+      const record: PendingJsFatal<BaseEvent> = {
+        jsFatalId: id,
+        event,
+        sessionSnapshotJson: JSON.stringify(session),
+      };
+      return this.native.writePendingCrashReport(id, JSON.stringify(record)) === true;
+    } catch (failure) {
+      reportSafely(failure);
+      return false;
     }
   }
 
@@ -153,14 +138,8 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
   }
 
   destroy(): void {
-    const eu = getErrorUtils();
-    try {
-      if (eu?.setGlobalHandler && this.wrapped && eu.getGlobalHandler?.() === this.wrapped) {
-        eu.setGlobalHandler(this.previousHandler ?? (() => {}));
-      }
-    } catch (error) {
-      handleError(error);
-    }
+    this.stopObserving?.();
+    this.stopObserving = undefined;
     // Best-effort rejection-tracking teardown: only the JSC polyfill module
     // exposes disable(); Hermes' native tracker has no un-set (single slot),
     // so we simply stop being able to re-install and leave it in place.
@@ -171,8 +150,6 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
     }
     this.rejectionModule = null;
     this.rejectionTrackingInstalled = false;
-    this.wrapped = null;
-    this.previousHandler = undefined;
     // Last: a still-armed engine tracker (Hermes' un-settable slot) may fire our
     // closure after this — the guard makes those late calls no-ops.
     this.active = false;
@@ -207,8 +184,13 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
     }
   }
 
-  buildEvent(error: Error, config?: ErrorCaptureOptions): EnrichedEvent<CoreEventType | RNExtraEventType> {
-    return this.enricher.enrich(shapeErrorEvent(error, config, this.config.getPrivacy()));
+  buildEvent(
+    error: Error,
+    config?: ErrorCaptureOptions,
+    timestamp?: number
+  ): EnrichedEvent<CoreEventType | RNExtraEventType> {
+    const shaped = shapeErrorEvent(error, config, this.config.getPrivacy());
+    return this.enricher.enrich({ ...shaped, timestamp });
   }
 
   queueEvent(event: EnrichedEvent<CoreEventType | RNExtraEventType>): void {

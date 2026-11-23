@@ -13,6 +13,7 @@ import {
   type NativeSignal,
   type NativeStackFrame,
   type PendingCrashRecord,
+  type PendingJsFatal,
 } from "./native-types";
 
 // The single seam to the native engines: nothing else touches NativeModules or
@@ -92,13 +93,22 @@ export async function initNative(
  *  launch the failure mode instead of data loss. */
 export async function readPendingCrashReports(
   mod: GroundcoverNativeModule
-): Promise<PendingCrashRecord[]> {
+): Promise<Array<PendingCrashRecord | PendingJsFatal>> {
   try {
     const raw = await mod.getPendingCrashReports();
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isAckableRecord).map(toCrashRecord);
+    return parsed.flatMap<PendingCrashRecord | PendingJsFatal>(raw => {
+      if (isRecord(raw) && typeof raw.jsFatalId === "string" && raw.jsFatalId.length > 0) {
+        return [{
+          jsFatalId: raw.jsFatalId,
+          event: raw.event,
+          sessionSnapshotJson: typeof raw.sessionSnapshotJson === "string" ? raw.sessionSnapshotJson : null,
+        }];
+      }
+      return isAckableRecord(raw) ? [toCrashRecord(raw)] : [];
+    });
   } catch (error) {
     handleError(error);
     return [];

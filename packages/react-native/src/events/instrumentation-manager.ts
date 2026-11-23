@@ -183,7 +183,7 @@ export class RNInstrumentationManager {
     if (this.isEnabled("exceptions")) {
       // Automatic uncaught-JS-error capture (via ErrorUtils) + the manual
       // captureException path. Gated by enabledEvents like the browser.
-      this.errorsEventsListener = new ErrorsEventsListener(this.listenerDeps());
+      this.errorsEventsListener = new ErrorsEventsListener(this.listenerDeps(), this.nativeModule);
       this.errorsEventsListener.initialize();
     }
     if (this.isEnabled("interaction")) {
@@ -421,6 +421,10 @@ export class RNInstrumentationManager {
 
   sendCustomEvent(event: { event: string; attributes: Record<string, unknown> }): void {
     this.manualEvents.sendCustomEvent(event);
+  }
+
+  captureStartupFatal(error: unknown, atMs: number): void {
+    this.errorsEventsListener?.captureFatal(error, atMs);
   }
 
   // Manually report a handled error. A no-op when "exceptions" isn't enabled
