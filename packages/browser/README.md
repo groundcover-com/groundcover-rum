@@ -216,7 +216,8 @@ options: {
 ```
 
 An exception thrown before the visitor first interacts with the page is sent when the page is
-hidden or closed; see [Visits without interaction](#visits-without-interaction).
+hidden or closed, even if the page was never on screen; see
+[Visits without interaction](#visits-without-interaction).
 
 ### `options.replay`
 
@@ -553,26 +554,32 @@ every other guarantee here is stated for that case.
 ### Visits without interaction
 
 The SDK sends nothing for a visit until the user first interacts with the page (pointer, key, scroll
-or touch input), and drops what it held if they never do, so bots and tabs opened and left in the
-background don't become sessions. The one exception is a visit that caught an exception:
+or touch input). When the page is hidden or closed before that (the visitor navigates away,
+reloads, closes the tab or switches to another), the visit is sent, with everything the SDK held for
+it (page load, network requests, logs, errors), if either:
 
-- **When the page is hidden or closed** (the visitor navigates away, closes the tab or switches to
-  another), a visit with no interaction yet is sent if it caught an exception, with everything the
-  SDK held for it (page load, network requests, logs) as context for the error. So an error thrown
-  while the page loads isn't lost when the visitor leaves before touching anything.
-- **Nothing is sent earlier**, and a visit without an exception is still dropped. The exception
-  doesn't count as an interaction: if the visitor comes back, the rest of the visit is held until
-  they interact. If that first interaction comes more than 30 minutes after the visit began, it
-  starts a new session (the inactivity gap), and what was held since the page was hidden is
-  dropped.
-- **Exceptions only**: uncaught errors, unhandled rejections and `captureException` calls.
-  Error-level logs don't count.
+- **The page was visible at some point**, so the visitor could see it. For example, a page that
+  loads slowly and is reloaded or left before it's used.
+- **It caught a real exception**: an uncaught error, an unhandled rejection or a `captureException`
+  call, even on a page that was never on screen. Error-level logs don't count, and neither do
+  browser messages that say nothing about the app (`Script error.` and the ResizeObserver loop
+  notices); those are still sent with a visit that goes for another reason.
+
+Otherwise the visit is dropped, so tabs opened in the background and closed unseen, pages that
+reload themselves in a background tab, and prerendered pages nobody opened don't become sessions.
+
+- **Nothing is sent while the page is open.** Neither reason counts as an interaction: if the
+  visitor comes back, the rest of the visit is held until they interact, and each time the page is
+  hidden again what arrived since is sent. If that first interaction comes more than 30 minutes
+  after the visit began, it starts a new session (the inactivity gap), and what was held since the
+  page was hidden is dropped.
+- **"Visible"** means the active tab of a window that isn't minimized. It doesn't mean someone was
+  looking: a visit that was visible with nobody there is sent too.
 - **Only the session the visit started with.** A session that begins later in a tab nobody has
-  touched (after `sessionMaxDuration`) is background traffic, and is still dropped even if it
-  catches an exception.
-- **`setSessionId()` before the first interaction** still drops what the visit held, exception
-  included.
-- **Visits without a real user that throw** (bots, crawlers) appear as sessions.
+  touched (after `sessionMaxDuration`) is background traffic, and is still dropped.
+- **`setSessionId()` before the first interaction** still drops what the visit held.
+- **Bots and headless browsers** report their pages as visible, so a crawler that closes its pages
+  normally appears as a session. Filter them with `beforeSend` if you need to.
 
 ### Micro-frontend session synchronization
 

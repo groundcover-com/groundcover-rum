@@ -928,20 +928,39 @@ describe("SessionLifecycle - ghost-session send gate", () => {
 });
 
 // releasesOnSuspend: the one exception to the ghost-session gate. A session no
-// interaction confirmed is sent on the host's suspend flush when its buffer
-// holds an event the platform names (the browser: an exception), so what it
-// caught isn't lost when the user leaves untouched.
+// interaction confirmed is sent on the host's suspend flush when the platform's
+// predicate releases its buffer (the browser: the page was visible, or a real
+// exception), so a visit worth keeping isn't lost when the user leaves untouched.
 describe("SessionLifecycle - releasing an unconfirmed session on suspend", () => {
-  const releasesExceptions = (event: BaseEvent) => event.type === "exception";
+  const releasesExceptions = (events: ReadonlyArray<BaseEvent>) =>
+    events.some((event) => event.type === "exception");
   const installedGate = (overrides: Partial<SessionLifecycleDeps<boolean>> = {}): FlushGate => {
     createLifecycle(overrides).install();
     return mockSetFlushGate.mock.calls[0]![0] as FlushGate;
   };
   const buffered = (...types: string[]) => types.map((type) => ({ type }) as BaseEvent);
 
-  it("opens the suspend flush of an unconfirmed session holding a releasing event", () => {
+  it("opens the suspend flush of an unconfirmed session whose buffer the predicate releases", () => {
     const gate = installedGate({ releasesOnSuspend: releasesExceptions });
     expect(gate({ lifecycle: true, events: buffered("pageload", "exception", "network") })).toBe(true);
+  });
+
+  it("asks the predicate about the whole buffer, once", () => {
+    const releasesOnSuspend = vi.fn((events: ReadonlyArray<BaseEvent>) => events.length > 1);
+    const gate = installedGate({ releasesOnSuspend });
+    const events = buffered("pageload", "network");
+
+    expect(gate({ lifecycle: true, events })).toBe(true);
+    expect(releasesOnSuspend).toHaveBeenCalledTimes(1);
+    expect(releasesOnSuspend).toHaveBeenCalledWith(events);
+    expect(gate({ lifecycle: true, events: buffered("pageload") })).toBe(false);
+  });
+
+  it("releases only on a true result, not a truthy one", () => {
+    const gate = installedGate({
+      releasesOnSuspend: (() => "yes") as unknown as (events: ReadonlyArray<BaseEvent>) => boolean,
+    });
+    expect(gate({ lifecycle: true, events: buffered("pageload") })).toBe(false);
   });
 
   it("holds every other send of that session (heartbeat, batch size, id flip)", () => {
@@ -970,7 +989,7 @@ describe("SessionLifecycle - releasing an unconfirmed session on suspend", () =>
     expect(gate({ lifecycle: true, events: buffered("exception") })).toBe(false);
   });
 
-  it("a releasing event neither confirms the session nor counts as presence", () => {
+  it("an event that releases the buffer neither confirms the session nor counts as presence", () => {
     createLifecycle({ releasesOnSuspend: releasesExceptions }).install();
 
     getHook()({ type: "exception" });
@@ -986,7 +1005,7 @@ describe("SessionLifecycle - releasing an unconfirmed session on suspend", () =>
     expect(gate({ lifecycle: true, events: buffered("pageload") })).toBe(true);
   });
 
-  it("an unconfirmed rotation still discards, releasing event or not", () => {
+  it("an unconfirmed rotation still discards, whatever the predicate says", () => {
     createLifecycle({ releasesOnSuspend: releasesExceptions }).install();
     tripCap();
 

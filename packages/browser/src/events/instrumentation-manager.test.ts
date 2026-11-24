@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { InstrumentationManager } from "./instrumentation-manager";
+import { InstrumentationManager, isBrowserReleasingEvent } from "./instrumentation-manager";
 import { msToNs } from "@groundcover/rum-core/common/global";
 import { ConfigManager } from "@groundcover/rum-core/config/config-manager";
 import { SessionState } from "@groundcover/rum-core/session/session-state";
@@ -682,16 +682,68 @@ describe("InstrumentationManager - ghost-session send gate", () => {
     expect(gate({ lifecycle: false, events: [] })).toBe(true);
   });
 
-  // An unconfirmed session holding an exception is sent by the page-hide flush
-  // only (end to end in errors-before-interaction.test.ts).
-  it("opens the page-hide flush, and only it, for an unconfirmed session holding an exception", () => {
-    const gate = mockSetFlushGate.mock.calls[0]![0] as FlushGate;
-    mockLastActivityState.value = 0;
-    const exception = { type: "exception" } as BaseEvent;
+  // An unconfirmed session is sent by the page-hide flush only, when the page
+  // was visible or the session caught a real exception (end to end in
+  // errors-before-interaction.test.ts).
+  describe("page-hide flush of an unconfirmed session", () => {
     const pageload = { type: "pageload" } as BaseEvent;
-    expect(gate({ lifecycle: true, events: [pageload, exception] })).toBe(true);
-    expect(gate({ lifecycle: false, events: [pageload, exception] })).toBe(false);
-    expect(gate({ lifecycle: true, events: [pageload] })).toBe(false);
+    const exception = (message: string) =>
+      ({ type: "exception", attributes: { error_message: message } }) as unknown as BaseEvent;
+
+    const setVisibility = (state: DocumentVisibilityState) =>
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+
+    // Restarts the manager with the page reading `state` as the SDK starts.
+    const gateStartedWhile = (state: DocumentVisibilityState): FlushGate => {
+      manager.uninstrument();
+      setVisibility(state);
+      manager = createManager();
+      manager.instrument();
+      return mockSetFlushGate.mock.calls.at(-1)![0] as FlushGate;
+    };
+
+    beforeEach(() => {
+      mockLastActivityState.value = 0;
+    });
+
+    afterEach(() => {
+      delete (document as { visibilityState?: unknown }).visibilityState;
+      delete (document as { prerendering?: unknown }).prerendering;
+    });
+
+    it("opens it for a page that was visible, no exception needed, and holds every other send", () => {
+      const gate = gateStartedWhile("visible");
+      setVisibility("hidden");
+      expect(gate({ lifecycle: true, events: [pageload] })).toBe(true);
+      expect(gate({ lifecycle: false, events: [pageload] })).toBe(false);
+    });
+
+    it("for a page never visible, opens it only for a real exception", () => {
+      const gate = gateStartedWhile("hidden");
+      expect(gate({ lifecycle: true, events: [pageload] })).toBe(false);
+      expect(gate({ lifecycle: true, events: [pageload, exception("load failed")] })).toBe(true);
+      expect(gate({ lifecycle: false, events: [pageload, exception("load failed")] })).toBe(false);
+    });
+
+    it("counts a page the user switches to later as visible", () => {
+      const gate = gateStartedWhile("hidden");
+      setVisibility("visible");
+      document.dispatchEvent(new Event("visibilitychange"));
+      setVisibility("hidden");
+      expect(gate({ lifecycle: true, events: [pageload] })).toBe(true);
+    });
+
+    it("counts a prerendered page only once the user opens it", () => {
+      Object.defineProperty(document, "prerendering", { configurable: true, get: () => true });
+      const gate = gateStartedWhile("hidden");
+      expect(gate({ lifecycle: true, events: [pageload] })).toBe(false);
+
+      delete (document as { prerendering?: unknown }).prerendering;
+      setVisibility("visible");
+      document.dispatchEvent(new Event("prerenderingchange"));
+      setVisibility("hidden");
+      expect(gate({ lifecycle: true, events: [pageload] })).toBe(true);
+    });
   });
 
   it("clears the flush gate on uninstrument()", () => {
@@ -749,5 +801,41 @@ describe("InstrumentationManager - ghost-session send gate", () => {
 
     getHook()({ type: "dom.event" });
     expect(manager.isReplayRecording()).toBe(true);
+  });
+});
+
+// Which exceptions send a visit nobody could see. Browser noise doesn't: the
+// same messages Sentry's SDK ignores by default.
+describe("isBrowserReleasingEvent", () => {
+  const exception = (attributes?: Record<string, unknown>) =>
+    ({ type: "exception", attributes }) as BaseEvent;
+
+  it("releases on an exception that says something about the app", () => {
+    expect(isBrowserReleasingEvent(exception({ error_message: "Cannot read properties of undefined" }))).toBe(true);
+    // No message to judge by: still an exception.
+    expect(isBrowserReleasingEvent(exception())).toBe(true);
+  });
+
+  it.each([
+    "Script error.",
+    "Script error",
+    "Javascript error: Script error. on line 0",
+    "ResizeObserver loop completed with undelivered notifications.",
+    "ResizeObserver loop limit exceeded",
+  ])("does not release on browser noise: %s", (message) => {
+    expect(isBrowserReleasingEvent(exception({ error_message: message }))).toBe(false);
+  });
+
+  it("matches the whole message, so an app error that mentions one still releases", () => {
+    expect(
+      isBrowserReleasingEvent(exception({ error_message: "Failed after Script error. in widget" }))
+    ).toBe(true);
+  });
+
+  it("never releases on anything but an exception", () => {
+    expect(
+      isBrowserReleasingEvent({ type: "log", attributes: { log_level: "error" } } as unknown as BaseEvent)
+    ).toBe(false);
+    expect(isBrowserReleasingEvent({ type: "pageload" } as BaseEvent)).toBe(false);
   });
 });

@@ -345,16 +345,41 @@ describe("wire-format golden contract", () => {
     expect(names).toContain("post-presence");
   });
 
-  it("sends a session that caught an exception when the app is hidden, before presence", async () => {
+  it("sends a session the app was visible for when it is hidden, before presence", async () => {
     const sdk = initSDK();
 
     sdk.sendCustomEvent({ event: "pre-presence", attributes: {} });
-    sdk.captureException(new Error("load failed"));
     await drainAsyncSends();
     // Still gated while the app is in use.
     expect(fetchMock).not.toHaveBeenCalled();
 
     try {
+      hidePage();
+      await drainAsyncSends();
+
+      // One request: everything held, no exception needed.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(
+        allSentEvents(fetchMock).some(
+          (e) => e.type === "custom" && e.attributes?.custom_event_name === "pre-presence"
+        )
+      ).toBe(true);
+    } finally {
+      showPage();
+    }
+  });
+
+  it("sends a session the app was never visible for when it caught an exception and is hidden, before presence", async () => {
+    try {
+      // Loaded out of sight (a background tab).
+      hidePage();
+      const sdk = initSDK();
+
+      sdk.sendCustomEvent({ event: "pre-presence", attributes: {} });
+      sdk.captureException(new Error("load failed"));
+      await drainAsyncSends();
+      expect(fetchMock).not.toHaveBeenCalled();
+
       hidePage();
       await drainAsyncSends();
 
@@ -370,11 +395,12 @@ describe("wire-format golden contract", () => {
     }
   });
 
-  it("does not send a session without an exception when the app is hidden, before presence", async () => {
-    const sdk = initSDK();
-
-    sdk.sendCustomEvent({ event: "pre-presence", attributes: {} });
+  it("does not send a session the app was never visible for without an exception when it is hidden, before presence", async () => {
     try {
+      hidePage();
+      const sdk = initSDK();
+
+      sdk.sendCustomEvent({ event: "pre-presence", attributes: {} });
       hidePage();
       await drainAsyncSends();
 

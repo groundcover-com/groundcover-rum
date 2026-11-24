@@ -50,12 +50,14 @@ export interface SessionLifecycleDeps<
   // recording batches). Platform-owned; pass an empty set if none exist.
   ignoredEventTypes: ReadonlySet<TType>;
   // Optional exception to the send gate, for the host's lifecycle flushes
-  // (flush({ lifecycle: true })). When it returns true for any buffered event,
-  // a session no interaction confirmed sends its whole buffer on that flush
-  // instead of holding it, so what the session caught (e.g. an exception while
-  // loading) isn't lost when the user leaves without touching anything. Every
-  // other send stays gated, the session stays unconfirmed, and the event
-  // doesn't count as presence.
+  // (flush({ lifecycle: true })). Given the whole buffer, it decides whether a
+  // session no interaction confirmed sends that buffer on the flush instead of
+  // holding it, so a visit worth keeping (e.g. one that caught an exception
+  // while loading, or one the user could see) isn't lost when the user leaves
+  // without touching anything. It may also read platform state of its own
+  // (the browser: whether the page was ever visible). Every other send stays
+  // gated, the session stays unconfirmed, and nothing it reads counts as
+  // presence.
   //
   // Only the session current when install() ran: a session a later rotation
   // starts with no interaction (the cap passing in a tab nobody touches) is
@@ -66,9 +68,10 @@ export interface SessionLifecycleDeps<
   // after a fatal error and after a recovered hang, so adopting this there as
   // is would release on those too.
   //
-  // Platform-owned (the browser: exceptions). Omitted: the gate has no
-  // exception, as on a platform that hasn't adopted it.
-  releasesOnSuspend?: (event: BaseEvent<TType>) => boolean;
+  // Platform-owned (the browser: the page was visible, or a real exception).
+  // Omitted: the gate has no exception, as on a platform that hasn't adopted
+  // it.
+  releasesOnSuspend?: (events: ReadonlyArray<BaseEvent<TType>>) => boolean;
   hooks?: SessionLifecycleHooks<TRotationContext>;
 }
 
@@ -88,7 +91,7 @@ export class SessionLifecycle<
   private readonly idGenerator: IdGenerator;
   private readonly activityEventTypes: ReadonlySet<TType>;
   private readonly ignoredEventTypes: ReadonlySet<TType>;
-  private readonly releasesOnSuspend: ((event: BaseEvent<TType>) => boolean) | null;
+  private readonly releasesOnSuspend: ((events: ReadonlyArray<BaseEvent<TType>>) => boolean) | null;
   private readonly hooks: SessionLifecycleHooks<TRotationContext>;
   private rotating = false;
   // Whether releasesOnSuspend still applies: true for the session current at
@@ -112,25 +115,25 @@ export class SessionLifecycle<
   // Arm the pool-side observation points. The enqueue hook drives per-event
   // reconciliation; the flush gate holds transmission until the session has
   // observed genuine presence (the anti-ghost-session rule), except for a
-  // lifecycle flush of the install-time session whose buffer holds an event
-  // releasesOnSuspend names. Install BEFORE the host's listeners arm, so the
-  // gate is in place before the first event is captured.
+  // lifecycle flush of the install-time session whose buffer releasesOnSuspend
+  // releases. Install BEFORE the host's listeners arm, so the gate is in place
+  // before the first event is captured.
   install(): void {
     this.pool.setBeforeEnqueueHook((event) => this.reconcileOnEnqueue(event));
     this.pool.setFlushGate(({ lifecycle, events }) =>
       this.session.hasUserActivity()
-      || (lifecycle && this.releaseEligible && this.holdsReleasingEvent(events))
+      || (lifecycle && this.releaseEligible && this.releasesBuffer(events))
     );
   }
 
   // Contained HERE rather than left to the pool: the pool fails a throwing gate
   // OPEN, which for this optional exception would send every unconfirmed
   // session. A releasesOnSuspend that throws releases nothing, as if omitted.
-  private holdsReleasingEvent(events: ReadonlyArray<BaseEvent<TType>>): boolean {
+  private releasesBuffer(events: ReadonlyArray<BaseEvent<TType>>): boolean {
     const releases = this.releasesOnSuspend;
     if (!releases) return false;
     try {
-      return events.some((event) => releases(event));
+      return releases(events) === true;
     } catch (error) {
       handleError(error);
       return false;

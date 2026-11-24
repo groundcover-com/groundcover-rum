@@ -4,13 +4,17 @@ import { expect, test, type Page } from "@playwright/test";
 import { EventType } from "./utils";
 
 /**
- * Errors before the first interaction, end to end.
+ * Visits before the first interaction, end to end.
  *
  * The SDK sends nothing for a session until the user first interacts, and drops
- * what it held if they never do (see ghost-sessions.spec.ts). The one exception:
- * an error thrown while the page loads, and the visitor leaves before touching
- * anything. Leaving the page sends that session, its error and everything it
- * held; a session without an error is still dropped.
+ * what it held if they never do (see ghost-sessions.spec.ts). The exception:
+ * when the visitor leaves before touching anything, the session is sent with
+ * everything it held if the page was visible (they could see it), or if it
+ * caught a real exception (a page that threw in a background tab). A page
+ * nobody could see, with no error, is still dropped.
+ *
+ * Playwright pages are visible, so the error cases load the page out of sight
+ * (`openPlaygroundOutOfSight`): only the error can send those.
  *
  * Harness notes:
  * - The batches go to a collector stub this spec runs (the playground's
@@ -89,6 +93,15 @@ async function openPlayground(page: Page, collector: Collector): Promise<void> {
   await expect(page.getByText("groundcover SDK Playground")).toBeVisible();
 }
 
+// A page loaded out of sight (a background tab). Playwright can't open one, so
+// the document reads "hidden" from before the SDK starts, and never changes.
+async function openPlaygroundOutOfSight(page: Page, collector: Collector): Promise<void> {
+  await page.addInitScript(() => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+  });
+  await openPlayground(page, collector);
+}
+
 // Runs `source` as a page script, so what it throws is uncaught like any other.
 async function runPageScript(page: Page, source: string): Promise<void> {
   await page.evaluate((text) => {
@@ -129,7 +142,7 @@ async function expectLoadErrorArrives(collector: Collector, message = LOAD_ERROR
   expect([...sessionIds][0]).toBeTruthy();
 }
 
-test.describe("RUM SDK | Errors before the first interaction", () => {
+test.describe("RUM SDK | Visits before the first interaction", () => {
   let collector: Collector;
 
   test.beforeEach(async () => {
@@ -141,7 +154,7 @@ test.describe("RUM SDK | Errors before the first interaction", () => {
   });
 
   test("a load error reaches the collector when the visitor navigates away without interacting", async ({ page }) => {
-    await openPlayground(page, collector);
+    await openPlaygroundOutOfSight(page, collector);
     await throwUncaught(page, LOAD_ERROR);
     await expectNothingSentWhileOnPage(page, collector);
 
@@ -151,7 +164,7 @@ test.describe("RUM SDK | Errors before the first interaction", () => {
   });
 
   test("an unhandled rejection while loading reaches the collector too", async ({ page }) => {
-    await openPlayground(page, collector);
+    await openPlaygroundOutOfSight(page, collector);
     await rejectUnhandled(page, LOAD_ERROR);
     await expectNothingSentWhileOnPage(page, collector);
 
@@ -165,7 +178,7 @@ test.describe("RUM SDK | Errors before the first interaction", () => {
       browserName === "webkit",
       "Playwright's WebKit closes the page without running its unload handlers (no beforeunload, pagehide or visibilitychange); navigating away covers WebKit"
     );
-    await openPlayground(page, collector);
+    await openPlaygroundOutOfSight(page, collector);
     await throwUncaught(page, LOAD_ERROR);
     await expectNothingSentWhileOnPage(page, collector);
 
@@ -175,10 +188,10 @@ test.describe("RUM SDK | Errors before the first interaction", () => {
   });
 
   test("a load error reaches the collector on pagehide alone, with no visibilitychange", async ({ page }) => {
-    await openPlayground(page, collector);
+    await openPlaygroundOutOfSight(page, collector);
     // A page already hidden when it unloads (a tab opened in the background and closed unseen)
-    // gets pagehide and no visibilitychange. Playwright can't open a page hidden, so this stops
-    // visibilitychange before any listener sees it.
+    // gets pagehide and no visibilitychange. The browser still sees this page as visible and
+    // fires one when it is left, so this stops it before any listener sees it.
     await page.evaluate(() => {
       window.addEventListener("visibilitychange", (event) => event.stopImmediatePropagation(), true);
     });
@@ -192,7 +205,7 @@ test.describe("RUM SDK | Errors before the first interaction", () => {
 
   test("an error the app throws in its own hide listener goes with that send", async ({ page }) => {
     const HIDE_ERROR = "Failed to save draft on hide";
-    await openPlayground(page, collector);
+    await openPlaygroundOutOfSight(page, collector);
     // Added after the SDK started, as an app's (or web-vitals') hide listener is.
     await runPageScript(
       page,
@@ -212,8 +225,30 @@ test.describe("RUM SDK | Errors before the first interaction", () => {
     await expectLoadErrorArrives(collector, HIDE_ERROR);
   });
 
-  test("a visit without interaction and without an error is still not sent", async ({ page }) => {
+  test("a visit without interaction or error reaches the collector when the visitor leaves a page they could see", async ({ page }) => {
     await openPlayground(page, collector);
+    await page.evaluate(() =>
+      window.groundcover?.sendCustomEvent({ event: "seen_no_error", attributes: {} })
+    );
+    await expectNothingSentWhileOnPage(page, collector);
+
+    await page.goto("about:blank");
+
+    await expect
+      .poll(
+        () =>
+          eventsOf(collector.batches, EventType.CUSTOM).some(
+            (event) => event.attributes?.custom_event_name === "seen_no_error"
+          ),
+        { message: "the visit should reach the collector after the page was left", timeout: 10_000 }
+      )
+      .toBe(true);
+    expect(eventsOf(collector.batches, EventType.PAGELOAD).length).toBeGreaterThan(0);
+    expect(eventsOf(collector.batches, EventType.EXCEPTION)).toHaveLength(0);
+  });
+
+  test("a visit nobody could see, without an error, is still not sent", async ({ page }) => {
+    await openPlaygroundOutOfSight(page, collector);
     await page.evaluate(() =>
       window.groundcover?.sendCustomEvent({ event: "background", attributes: {} })
     );
@@ -222,6 +257,6 @@ test.describe("RUM SDK | Errors before the first interaction", () => {
     await page.goto("about:blank");
     await page.waitForTimeout(SETTLE_MS);
 
-    expect(collector.batches, "no error, so the gate drops the session").toHaveLength(0);
+    expect(collector.batches, "never visible and no error, so the gate drops the session").toHaveLength(0);
   });
 });
