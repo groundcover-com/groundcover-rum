@@ -7,6 +7,7 @@
 // published `@groundcover/browser` d.ts keeps the exact typed API it always
 // had.
 import type {
+  ErrorReportingOptions as CoreErrorReportingOptions,
   PrivacyOptions as CorePrivacyOptions,
   SDKOptions as CoreSDKOptions,
   SDKConfigInput as CoreSDKConfigInput,
@@ -51,9 +52,24 @@ export type {
   Redactor,
   TracingOptions,
   TransportOptions,
-  ErrorReportingOptions,
   ErrorDeduplicationOptions,
 } from "@groundcover/rum-core/config/types";
+
+/** How errors are reported. */
+export interface ErrorReportingOptions extends CoreErrorReportingOptions {
+  /**
+   * Run the callbacks your code passes to `setTimeout`, `setInterval`,
+   * `requestAnimationFrame` and `addEventListener` inside a try/catch, so an
+   * error one of them throws is reported with its message and stack even when
+   * the browser hides it. Safari, and every browser on iOS, hides such an
+   * error as "Script error." when the callback's script is served from another
+   * origin, even with `crossorigin` and CORS headers, and the SDK can't report
+   * it otherwise. The error is rethrown unchanged, so the page and its other
+   * error handlers see what they saw before. Default `false`. Needs the
+   * `exceptions` listener.
+   */
+  wrapCallbacks?: boolean;
+}
 
 /**
  * The view an event was captured on. Browser-owned: core has no notion of a
@@ -185,8 +201,13 @@ export interface PrivacyOptions extends CorePrivacyOptions {
 export interface SDKOptions
   extends Omit<
     CoreSDKOptions,
-    "privacy" | "enabledEvents" | "beforeSend" | "enrichEvent"
+    "privacy" | "enabledEvents" | "beforeSend" | "enrichEvent" | "errors"
   > {
+  /**
+   * How errors are reported: merging of repeated exceptions and error-level
+   * logs, and wrapping of callbacks; see {@link ErrorReportingOptions}.
+   */
+  errors?: ErrorReportingOptions;
   /**
    * Inspect each event before it is queued; return false to drop it. Typed
    * over the BROWSER event map, so `attributes.location` is visible here.

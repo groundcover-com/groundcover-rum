@@ -224,6 +224,12 @@ export class InstrumentationManager {
     }
   }
 
+  // After an updateConfig that touched `options.errors`: callback wrapping is
+  // installed or removed to match it. No-op when exceptions aren't captured.
+  applyErrorOptions() {
+    this.errorsEventsListener?.syncCallbackWrapping();
+  }
+
   private isNavigationTrackingEnabled(): boolean {
     const config = this.configManager.getConfig();
     return config?.options?.enabledEvents?.includes("navigation") || config?.options?.enabledEvents?.length === 0;

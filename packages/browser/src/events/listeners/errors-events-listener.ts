@@ -12,20 +12,51 @@ import {
   className,
   coerceToError,
 } from "@groundcover/rum-core/events/errors/coerce-error";
+import type { ErrorReportingOptions } from "../../config/types";
+import {
+  disableCallbackWrapping,
+  enableCallbackWrapping,
+  forgetRethrown,
+  takeLastRethrown,
+} from "./callback-wrapping";
 
 // Uncaught errors and unhandled rejections from the window listeners, and
 // whatever the app passes to captureException. The two entries stay apart:
 // the listeners report only real error and rejection events, while
 // captureException accepts any value.
 export class ErrorsEventsListener extends BaseListener {
+  // Between initialize() and destroy(): a config update after teardown must
+  // not turn callback wrapping back on.
+  private live = false;
+
   initialize() {
     _globalThis?.addEventListener("error", this.handleEvent);
     _globalThis?.addEventListener("unhandledrejection", this.handleEvent);
+    this.live = true;
+    // After the window listeners above, so they aren't wrapped themselves.
+    this.syncCallbackWrapping();
   }
 
   destroy() {
+    this.live = false;
+    disableCallbackWrapping(this);
     _globalThis?.removeEventListener("error", this.handleEvent);
     _globalThis?.removeEventListener("unhandledrejection", this.handleEvent);
+  }
+
+  // Turns callback wrapping on or off to match `options.errors.wrapCallbacks`:
+  // at initialize() and after each updateConfig that touches `errors`.
+  syncCallbackWrapping() {
+    try {
+      const errors = this.config.getConfig()?.options?.errors as ErrorReportingOptions | undefined;
+      if (this.live && errors?.wrapCallbacks === true) {
+        enableCallbackWrapping(this);
+      } else {
+        disableCallbackWrapping(this);
+      }
+    } catch (error) {
+      handleError(error);
+    }
   }
 
   handleEvent = (event: Event) => {
@@ -33,7 +64,7 @@ export class ErrorsEventsListener extends BaseListener {
 
     try {
       const error = isErrorEvent(event)
-        ? errorFromErrorEvent(event)
+        ? errorFromWindowError(event)
         : event.type === "unhandledrejection"
           ? errorFromRejectionEvent(event)
           : null;
@@ -93,10 +124,30 @@ function isEvent(value: unknown): value is Event {
 function errorFromErrorEvent(event: ErrorEvent): Error | null {
   const thrown: unknown = event.error;
   if (thrown == null) {
-    const message = event.message || "";
-    if (/^Script error\.?$/.test(message)) return null;
-    return atThrowSite(new Error(message || "Unknown error"), event);
+    if (isHiddenError(event)) return null;
+    return atThrowSite(new Error(event.message || "Unknown error"), event);
   }
+  return errorFromThrown(thrown, event);
+}
+
+// What the window "error" listener reports. With `options.errors.wrapCallbacks`
+// on, an error the browser hid is reported as the value a callback wrapper
+// caught and rethrew just before the event (see callback-wrapping.ts); with no
+// such value, a hidden error is still dropped.
+function errorFromWindowError(event: ErrorEvent): Error | null {
+  if (event.error == null && isHiddenError(event)) {
+    const recovered = takeLastRethrown();
+    return recovered ? errorFromThrown(recovered.value, event) : null;
+  }
+  forgetRethrown(event.error);
+  return errorFromErrorEvent(event);
+}
+
+function isHiddenError(event: ErrorEvent): boolean {
+  return /^Script error\.?$/.test(event.message || "");
+}
+
+function errorFromThrown(thrown: unknown, event: ErrorEvent): Error {
   const error = coerceToError(thrown);
   // The SDK built this Error, so its own stack would point into the SDK.
   // Use the throw site instead, unless the thrown value brought a stack.

@@ -174,11 +174,12 @@ Batching and delivery of outgoing events.
 
 ### `options.errors`
 
-How errors are reported. From `2.3.0`.
+How errors are reported. `deduplication` is available from `2.3.0`, `wrapCallbacks` from `2.4.0`.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
 | `deduplication.enabled` | `boolean` | `true` | Merge repeats of the same error within a batch. `false` sends every occurrence. `deduplication: false` is shorthand for `{ enabled: false }`. |
+| `wrapCallbacks` | `boolean` | `false` | Report errors that Safari and iOS browsers hide as `"Script error."` by running the callbacks your code passes to `setTimeout`, `setInterval`, `requestAnimationFrame` and `addEventListener` inside a try/catch. See [Errors hidden as "Script error."](#errors-hidden-as-script-error). |
 
 An error loop can send the same exception, or log the same error, thousands of times. With
 deduplication on, a repeat of an exception or an error-level log that is still waiting in the current
@@ -211,6 +212,43 @@ count of an error is the sum of the field over its events.
 options: {
   errors: {
     deduplication: false, // send every occurrence
+  },
+}
+```
+
+#### Errors hidden as "Script error."
+
+Safari, and every browser on iOS, hides an error thrown inside a `setTimeout`, `setInterval`,
+`requestAnimationFrame` or event-listener callback when the script that registered the callback is
+served from another origin, such as a CDN, even when it is loaded with `crossorigin="anonymous"` and
+served with CORS headers. The page's `error` event then carries only `"Script error."`, with no
+error, file or stack, so the SDK has nothing to report and drops it. Errors thrown while such a
+script first runs and unhandled promise rejections arrive in full, and so does everything in Chrome
+and Firefox.
+
+With `wrapCallbacks: true`, the SDK runs each callback your code passes to those four functions
+inside its own try/catch. When one throws, the SDK notes the error and throws it again unchanged,
+then reports it, with its real type, message and stack, when the browser's `"Script error."` event
+arrives. A browser that shows the error in full reports it as it always did, and an error is never
+sent twice. It needs the `exceptions` listener, and `updateConfig` can turn it on or off at runtime.
+
+- **Only those four functions are wrapped.** Callbacks registered another way (an `onclick`
+  property, a `MutationObserver`, or a copy of `setTimeout` your code saved before `init`) are
+  still hidden. Errors your framework catches itself were never
+  uncaught, and still aren't reported as uncaught.
+- **Listeners behave as before.** Adding the same listener twice registers it once, and
+  `removeEventListener` removes it, including a listener added before `init` and again after it.
+  Once wrapping has been on, `addEventListener` and `removeEventListener` keep the SDK's layer
+  after it is turned off or the SDK shuts down, so a listener added while it was on can still be
+  removed; with wrapping off, that layer adds new listeners unwrapped.
+- **Other error handlers see what they saw before** when the SDK is bundled with your code. If the
+  SDK is served from a different origin than your page, Safari also hides errors from your page's
+  own callbacks from other handlers, such as `window.onerror`; the SDK still reports them.
+
+```ts
+options: {
+  errors: {
+    wrapCallbacks: true,
   },
 }
 ```

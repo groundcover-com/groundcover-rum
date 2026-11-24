@@ -282,6 +282,10 @@ export class SessionManager {
       if (privacyChanged || blockedSelectorsChanged || canvasChanged) {
         this.core.instrumentation.restartReplayForConfigChange();
       }
+      // `errors.wrapCallbacks` installs or removes wrappers, so apply it now.
+      if (!!opts && Object.hasOwn(opts, "errors")) {
+        this.core.instrumentation.applyErrorOptions();
+      }
     } catch (error) {
       handleError(error);
     }
