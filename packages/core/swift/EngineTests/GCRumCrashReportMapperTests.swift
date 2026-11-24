@@ -44,6 +44,16 @@ struct GCRumCrashReportMapperTests {
 
     // MARK: - error_type
 
+    @Test("skips React Native's JS rethrow but keeps its other fatal exceptions")
+    func reactNativeFatalExceptions() throws {
+        let jsFatal = report(error: ["nsexception": ["name": "RCTFatalException: Unhandled JS Exception: boom"]])
+        #expect(GCRumCrashReportMapper.buildRecord(report: jsFatal, sessionSnapshotJson: snapshot) == nil)
+
+        let nativeName = "RCTFatalException: Could not load bundle"
+        let record = try mapped(report(error: ["nsexception": ["name": nativeName]]))
+        #expect(record["errorType"] as? String == nativeName)
+    }
+
     @Test("prefers an NSException's name over the mach exception and signal")
     func prefersNSExceptionName() throws {
         // The most specific name wins: it is what the backend groups on, and
