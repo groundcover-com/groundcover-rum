@@ -4,13 +4,13 @@ name: Flutter CI
 # playground, on Flutter-touching changes. Shaped like react-native.yml, for the
 # same reasons:
 #
-# - `push` is scoped to main and path-filtered at the trigger; `pull_request` is
-#   NOT. `Flutter CI` at the bottom is the lane's check to require, and a
-#   workflow skipped by a trigger-level path filter creates no check run at all,
-#   which would block every PR that doesn't touch Flutter. So on PRs the workflow
-#   always starts, `changes` decides whether the work runs, and `gate` always
-#   reports. Full reasoning in .github/actions/changed-paths.
-# - The `changes` filter fails CLOSED (a positive list), like the RN lane's.
+# - `push` is scoped to main, and neither trigger is path-filtered. `Flutter CI`
+#   at the bottom is the lane's check to require, and a workflow skipped by a
+#   trigger-level path filter creates no check run at all, which would block
+#   every PR that doesn't touch Flutter. So the workflow always starts, `changes`
+#   decides whether the work runs, and `gate` always reports.
+# - `changes` filters on a positive list of paths, failing CLOSED, like the RN
+#   lane's.
 #
 # The device jobs run the shared Mobilewright suite (tests/e2e/mobile) against
 # apps/flutter-playground with APP=flutter. Tags decide what runs: the Flutter
@@ -21,34 +21,7 @@ name: Flutter CI
 on:
   push:
     branches: [main]
-    paths:
-      - 'packages/flutter/**'
-      - 'apps/flutter-playground/**'
-      # The wire contract the Dart golden checks.
-      - 'packages/core/wire/**'
-      # The native engine the plugin vendors, the script that copies it, and its
-      # unit-test steps (shared with react-native.yml).
-      - 'packages/core/swift/**'
-      - 'packages/core/kotlin/**'
-      - 'scripts/vendor-engine.mjs'
-      - '.github/actions/engine-tests-kotlin/**'
-      # The shared e2e suite, its root config and the Mobilewright patch: every
-      # spec runs against the Flutter app too.
-      - 'tests/e2e/mobile/**'
-      - 'mobilewright.config.ts'
-      - 'patches/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - '.github/workflows/flutter.yml'
-      - '.github/actions/changed-paths/**'
-      # Set aside after the includes above, as the `changes` job does.
-      - '!packages/core/**/*.md'
-      - '!tests/e2e/mobile/native-*.sh'
-      - '!tests/e2e/mobile/ci-native-*.sh'
-      #
-      # THIS LIST AND THE `changes` JOB'S PATTERN LIST MUST AGREE: one policy in
-      # two syntaxes.
+  # No `paths:` on either trigger, on purpose — see the header.
   # The default activity types, plus ready_for_review: leaving draft is what
   # turns the pending-marks check in `lint` on, so it has to start a run.
   pull_request:
@@ -82,74 +55,66 @@ jobs:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
-      flutter: ${{ steps.filter.outputs.flutter }}
-      ios-native: ${{ steps.filter.outputs.ios-native }}
+      # 'true' when the filter didn't run: see its `if:`.
+      flutter: ${{ steps.filter.outputs.flutter || 'true' }}
+      ios-native: ${{ steps.filter.outputs.ios-native || 'true' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # How the files are listed, and when the filter is skipped: react-native.yml.
+      - if: ${{ github.event_name == 'push' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/actions/changed-paths
-      - id: paths
-        uses: ./.github/actions/changed-paths
-      - name: Decide whether the Flutter lane runs
-        id: filter
-        env:
-          FILES: ${{ steps.paths.outputs.files-path }}
-          IS_PR: ${{ steps.paths.outputs.is-pull-request }}
-        run: |
-          set -euo pipefail
-          if [ "$IS_PR" != 'true' ]; then
-            echo 'not a PR — the trigger already filtered this'
-            echo 'flutter=true' >> "$GITHUB_OUTPUT"
-            echo 'ios-native=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # What the CocoaPods build (ios-pods) can see change: the plugin's and
-          # the playground's native iOS halves, the engine, and the manifests
-          # that pick plugins. A Dart-only push can't break it.
-          if grep -qE \
-              -e '^packages/flutter/ios/' \
-              -e '^packages/flutter/pubspec\.yaml$' \
-              -e '^apps/flutter-playground/ios/' \
-              -e '^apps/flutter-playground/pubspec\.(yaml|lock)$' \
-              -e '^packages/core/swift/' \
-              -e '^scripts/vendor-engine\.mjs$' \
-              -e '^\.github/workflows/flutter\.yml$' \
-              "$FILES"; then
-            echo 'ios-native=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'ios-native=false' >> "$GITHUB_OUTPUT"
-          fi
-          # Keep in sync with the `push` trigger's paths: list above. Core's
-          # Markdown and the native lanes' own e2e scripts reach no Flutter build
-          # or test. A temp file rather than a pipe, for react-native.yml's reason.
-          grep -vE \
-              -e '^packages/core/.*\.md$' \
-              -e '^tests/e2e/mobile/(ci-)?native-[^/]+\.sh$' \
-              "$FILES" > "$RUNNER_TEMP/flutter-files" || true
-          if grep -qE \
-              -e '^packages/flutter/' \
-              -e '^apps/flutter-playground/' \
-              -e '^packages/core/wire/' \
-              -e '^packages/core/swift/' \
-              -e '^packages/core/kotlin/' \
-              -e '^scripts/vendor-engine\.mjs$' \
-              -e '^\.github/actions/engine-tests-kotlin/' \
-              -e '^tests/e2e/mobile/' \
-              -e '^mobilewright\.config\.ts$' \
-              -e '^patches/' \
-              -e '^package\.json$' \
-              -e '^pnpm-lock\.yaml$' \
-              -e '^pnpm-workspace\.yaml$' \
-              -e '^\.github/workflows/flutter\.yml$' \
-              -e '^\.github/actions/changed-paths/' \
-              "$RUNNER_TEMP/flutter-files"; then
-            echo 'Flutter-relevant changes found — running the lane'
-            echo 'flutter=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'no Flutter-relevant changes — skipping the lane'
-            echo 'flutter=false' >> "$GITHUB_OUTPUT"
-          fi
+      - id: filter
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.changed_files < 3000) }}
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          # A file counts when it matches a path below and none of the `!` ones.
+          predicate-quantifier: some-with-excludes
+          filters: |
+            flutter:
+              - 'packages/flutter/**'
+              - 'apps/flutter-playground/**'
+              # The wire contract the Dart golden checks.
+              - 'packages/core/wire/**'
+              # The native engine the plugin vendors, and the script that copies
+              # it.
+              - 'packages/core/swift/**'
+              - 'packages/core/kotlin/**'
+              - 'scripts/vendor-engine.mjs'
+              # The shared e2e suite, its root config and the Mobilewright patch:
+              # every spec runs against the Flutter app too. Then the install the
+              # suite runs from.
+              - 'tests/e2e/mobile/**'
+              - 'mobilewright.config.ts'
+              - 'patches/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.npmrc'
+              # The lane's own definition, and the engine test steps it shares.
+              - '.github/workflows/flutter.yml'
+              - '.github/actions/engine-tests-kotlin/**'
+
+              # Markdown and the licences, which nothing this lane builds or runs
+              # reads, and the native lanes' own scripts in the shared e2e suite.
+              - '!**/*.md'
+              - '!**/LICENSE'
+              - '!tests/e2e/mobile/native-*.sh'
+              - '!tests/e2e/mobile/ci-native-*.sh'
+
+            # Whether `ios-pods`, the playground built through CocoaPods, is worth
+            # a macOS runner on top of the lane: the plugin's and the playground's
+            # native iOS halves, the engine, and the manifests that pick plugins.
+            # A Dart-only change can't break it.
+            ios-native:
+              - 'packages/flutter/ios/**'
+              - 'packages/flutter/pubspec.yaml'
+              - 'apps/flutter-playground/ios/**'
+              - 'apps/flutter-playground/pubspec.{yaml,lock}'
+              - 'packages/core/swift/**'
+              - 'scripts/vendor-engine.mjs'
+              - '.github/workflows/flutter.yml'
+              - '!**/*.md'
 
   # Static analysis only, first, like the RN lane: everything else needs it.
   #

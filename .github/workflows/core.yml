@@ -8,9 +8,11 @@ name: Core CI
 # ../core/ts/src (tsconfig paths + vitest alias) and inline it via tsup
 # `noExternal`, so there is no artifact boundary: a core change is a source
 # change inside the browser bundle and inside the RN bundle. That is why
-# packages/core runs both the web and RN lanes (web skips only core/swift,
-# core/kotlin and core's Markdown, which tsup never sees), and why this lane
-# covers only core's own tests rather than pretending to be an integration gate.
+# packages/core runs both the web and RN lanes, less what neither bundle sees
+# (core's Markdown, its tests and the tooling only this lane reads; for web,
+# also the native engine in core/swift and core/kotlin: see their `changes`
+# filters), and why this lane covers only core's own tests rather than
+# pretending to be an integration gate.
 #
 # Deliberately NOT path-filtered, and deliberately without a `changes` job or a
 # gate job, unlike the other lanes. Two reasons:
