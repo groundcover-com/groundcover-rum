@@ -68,6 +68,8 @@ export interface InstrumentationManagerDeps {
   /** Absent in Expo Go and in any binary predating the native package — the
    *  native-backed listeners then simply never arm. */
   nativeModule?: GroundcoverNativeModule | null;
+  /** Fired after a fatal JS error is saved to disk, so the composition root can send it. */
+  onFatalSaved?: () => void;
 }
 
 // RN's instrumentation orchestrator (mirror of the browser's): constructs and
@@ -98,6 +100,7 @@ export class RNInstrumentationManager {
   private vitalsListener: VitalsEventsListener | null = null;
   private nativeSignals: NativeSignalsRouter | null = null;
   private readonly nativeModule: GroundcoverNativeModule | null;
+  private readonly onFatalSaved?: () => void;
   private nativeCoverage: NativeGestureCoverage = NO_NATIVE_COVERAGE;
   private screenChangeUnsub: (() => void) | null = null;
   private instrumented = false;
@@ -119,6 +122,7 @@ export class RNInstrumentationManager {
     this.enricher = deps.enricher;
     this.screenHolder = deps.screenHolder;
     this.nativeModule = deps.nativeModule ?? null;
+    this.onFatalSaved = deps.onFatalSaved;
 
     this.manualEvents = new ManualEventEmitter<RNExtraEventType>({
       config: this.configManager,
@@ -183,7 +187,11 @@ export class RNInstrumentationManager {
     if (this.isEnabled("exceptions")) {
       // Automatic uncaught-JS-error capture (via ErrorUtils) + the manual
       // captureException path. Gated by enabledEvents like the browser.
-      this.errorsEventsListener = new ErrorsEventsListener(this.listenerDeps(), this.nativeModule);
+      this.errorsEventsListener = new ErrorsEventsListener(
+        this.listenerDeps(),
+        this.nativeModule,
+        this.onFatalSaved
+      );
       this.errorsEventsListener.initialize();
     }
     if (this.isEnabled("interaction")) {

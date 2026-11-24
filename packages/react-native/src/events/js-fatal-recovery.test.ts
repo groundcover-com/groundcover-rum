@@ -23,7 +23,7 @@ function fixture() {
     nativeInit: async () => "{}",
     updateSessionSnapshot: vi.fn(),
     writePendingCrashReport: vi.fn((id: string, json: string) => { files.set(id, json); return true; }),
-    getPendingCrashReports: async () => JSON.stringify(Array.from(files.values(), json => JSON.parse(json))),
+    getPendingCrashReports: vi.fn(async () => JSON.stringify(Array.from(files.values(), json => JSON.parse(json)))),
     clearPendingCrashReports: vi.fn(async (ids: string[]) => {
       for (const id of ids) files.delete(id);
     }),
@@ -59,7 +59,7 @@ describe("fatal JS recovery", () => {
     const [ordinary] = beforeSend.mock.calls[0]!;
     const [, json] = native.writePendingCrashReport.mock.calls[0]!;
     const saved = JSON.parse(json) as PendingJsFatal<BaseEvent>;
-    expect(saved.event.attributes).toEqual(ordinary.attributes);
+    expect(saved.events.at(-1)!.attributes).toEqual(ordinary.attributes);
     expect(json).not.toContain("private-message");
   });
 
@@ -83,7 +83,8 @@ describe("fatal JS recovery", () => {
     const [id, json] = Array.from(files.entries())[0]!;
     const saved = JSON.parse(json) as PendingJsFatal<BaseEvent>;
     expect(saved.jsFatalId).toBe(id);
-    expect(saved.event).toMatchObject({ id, timestamp: msToNs(at), attributes: { sanitized: true } });
+    expect(saved.events).toHaveLength(1);
+    expect(saved.events[0]).toMatchObject({ id, timestamp: msToNs(at), attributes: { sanitized: true } });
     expect(json).not.toContain("startup failure");
     expect(beforeSend).toHaveBeenCalledOnce();
     expect(enrichEvent).toHaveBeenCalledOnce();
@@ -100,7 +101,7 @@ describe("fatal JS recovery", () => {
     expect(batches).toHaveLength(2);
     for (const batch of batches) {
       expect(batch.sessionAttributes.session_id).toBe("original");
-      expect(batch.events).toEqual([saved.event]);
+      expect(batch.events).toEqual(saved.events);
     }
   });
 
@@ -115,25 +116,40 @@ describe("fatal JS recovery", () => {
     groundcover.init({ ...config, options: { ...options, beforeSend } });
     await __whenReady();
     reportPresence(Date.now());
-    fatal();
-    expect(beforeSend).toHaveBeenCalledOnce();
-    expect(host).toHaveBeenCalledOnce();
-    await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
-  });
-
-  it("flushes events queued before a successfully saved fatal", async () => {
-    const { fatal, native, send } = fixture();
-    groundcover.init({ ...config, options });
-    await __whenReady();
-    reportPresence(Date.now());
     groundcover.captureException(new Error("earlier handled error"));
-    expect(send).not.toHaveBeenCalled();
     fatal();
-    expect(native.writePendingCrashReport).toHaveBeenCalledOnce();
+    expect(beforeSend).toHaveBeenCalledTimes(2);
+    expect(host).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
     const [, init] = send.mock.calls[0]!;
     const batch = JSON.parse(strFromU8(init.body as Uint8Array)) as Batch;
-    expect(batch.events.map(event => event.attributes?.error_message)).toEqual(["earlier handled error"]);
+    expect(batch.events.map(event => event.attributes?.error_message)).toEqual(["earlier handled error", "startup failure"]);
+  });
+
+  it.each(["before", "after"])("saves queued events with the fatal and sends them once in the same run, %s the first tap", async timing => {
+    const { fatal, files, host, native, send } = fixture();
+    groundcover.init({ ...config, sessionId: "original", options: { ...options, enabledEvents: ["exceptions", "logs"] } });
+    await __whenReady();
+    // Let the startup recovery finish, so only a run started by the save can send the file.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(native.getPendingCrashReports).toHaveBeenCalledOnce();
+    if (timing === "after") reportPresence(Date.now());
+    groundcover.logger.info("earlier log");
+    groundcover.captureException(new Error("earlier handled error"));
+    expect(send).not.toHaveBeenCalled();
+    fatal();
+    expect(host).toHaveBeenCalledOnce();
+    expect(native.writePendingCrashReport).toHaveBeenCalledOnce();
+    const [, json] = native.writePendingCrashReport.mock.calls[0]!;
+    const saved = JSON.parse(json) as PendingJsFatal<BaseEvent>;
+    expect(saved.events.map(event => event.type)).toEqual(["log", "exception", "exception"]);
+    await vi.waitFor(() => expect(files.size).toBe(0));
+    expect(native.getPendingCrashReports).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledOnce();
+    const [, init] = send.mock.calls[0]!;
+    const batch = JSON.parse(strFromU8(init.body as Uint8Array)) as Batch;
+    expect(batch.sessionAttributes.session_id).toBe("original");
+    expect(batch.events).toEqual(saved.events);
   });
 
   it("reconciles the session before committing the crash", async () => {

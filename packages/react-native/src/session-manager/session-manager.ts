@@ -63,6 +63,7 @@ export class RNSessionManager {
   private core: CoreHandles | null = null;
   private appStateSub: NativeEventSubscription | null = null;
   private native: GroundcoverNativeModule | null = null;
+  private nativeReady: Promise<void> = Promise.resolve();
   // App-background wiring, the RN analogue of the browser's visibilitychange
   // hide handler. On any leave-foreground transition persist the exact activity
   // timestamp (steady-state writes are throttled). But FLUSH only on "background"
@@ -207,6 +208,8 @@ export class RNSessionManager {
       // A rotation mints a new session id — native's copy has to follow it.
       onSessionIdentityChanged: () => snapshots.push(),
       nativeModule: this.native,
+      // An app that survives the fatal sends the saved record now, not at its next start.
+      onFatalSaved: () => this.drainCrashesAfterHarvest(configManager, this.nativeReady),
     });
 
     // Everything past here arms live resources; `core` is assigned LAST so a
@@ -226,7 +229,8 @@ export class RNSessionManager {
       // Only now can the envelope be read — and only after `core` is live, so a
       // teardown from a failed startup never leaves native holding a snapshot
       // for a session that does not exist.
-      this.drainCrashesAfterHarvest(configManager, this.armNative(configManager, true));
+      this.nativeReady = this.armNative(configManager, true);
+      this.drainCrashesAfterHarvest(configManager, this.nativeReady);
       snapshots.push();
     } catch (error) {
       this.logger.log("[rn-session-manager] init failed — tearing down partial startup:", error);

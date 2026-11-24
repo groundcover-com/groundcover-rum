@@ -28,6 +28,9 @@ import { reportSafely } from "../internal/report-safely";
 // the drain bypasses EventsPool and sends each report as its own batch, built from the
 // snapshot native persisted at crash time. The current session's id never touches these.
 //
+// It also runs right after a fatal JS error is saved, so an app that keeps running sends
+// that record in the same run instead of holding it until the next start.
+//
 // At-least-once: native keeps a record until JS confirms the POST, and `crash_report_id`
 // is stable across redeliveries, so a duplicate can be recognised. Losing a fatal is far
 // worse than reporting it twice.
@@ -108,8 +111,9 @@ async function reportOne(record: PendingCrashRecord | PendingJsFatal, deps: Drai
   const { screen, ...sessionAttributes } = snapshot;
 
   if ("jsFatalId" in record) {
-    if (!isUsableEvent(record.event)) return true;
-    return sendUnderSnapshot({ deps, sessionAttributes, event: record.event as BaseEvent });
+    const events = record.events.filter(isUsableEvent) as BaseEvent[];
+    if (!events.length) return true;
+    return sendUnderSnapshot({ deps, sessionAttributes, events });
   }
 
   // A local enricher so the crash-time screen is stamped nested (like every
@@ -171,7 +175,7 @@ async function reportOne(record: PendingCrashRecord | PendingJsFatal, deps: Drai
     if (enriched.ok && isUsableEvent(enriched.value)) event = enriched.value as typeof event;
   }
 
-  return sendUnderSnapshot({ deps, sessionAttributes, event });
+  return sendUnderSnapshot({ deps, sessionAttributes, events: [event] });
 }
 
 /**
@@ -277,9 +281,9 @@ function buildAttributes(
 async function sendUnderSnapshot(args: {
   deps: DrainDeps;
   sessionAttributes: Record<string, unknown>;
-  event: ReturnType<EventEnricher["enrich"]>;
+  events: Array<ReturnType<EventEnricher["enrich"]>>;
 }): Promise<boolean> {
-  const { deps, sessionAttributes, event } = args;
+  const { deps, sessionAttributes, events } = args;
 
   let settle: (delivered: boolean) => void = () => {};
   const delivered = new Promise<boolean>((resolve) => {
@@ -298,7 +302,7 @@ async function sendUnderSnapshot(args: {
     {
       // The crashed session's envelope, verbatim — never the current one's.
       sessionAttributes: sessionAttributes as never,
-      events: [event],
+      events,
     },
     // Inline encode: RN has no worker, and this path should not wait on one.
     { lifecycle: true }

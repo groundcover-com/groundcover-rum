@@ -103,7 +103,7 @@ export async function readPendingCrashReports(
       if (isRecord(raw) && typeof raw.jsFatalId === "string" && raw.jsFatalId.length > 0) {
         return [{
           jsFatalId: raw.jsFatalId,
-          event: raw.event,
+          events: Array.isArray(raw.events) ? raw.events : [],
           sessionSnapshotJson: typeof raw.sessionSnapshotJson === "string" ? raw.sessionSnapshotJson : null,
         }];
       }

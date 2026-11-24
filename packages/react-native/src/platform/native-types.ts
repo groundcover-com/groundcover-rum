@@ -36,7 +36,8 @@ export type NativeStackFrame = {
 // compatible reader instead of acknowledging them as native crashes during an OTA rollback.
 export type PendingJsFatal<TEvent = unknown> = {
   jsFatalId: string;
-  event: TEvent;
+  /** The events that were queued when the fatal was captured, then the fatal itself. */
+  events: TEvent[];
   sessionSnapshotJson: string | null;
 };
 

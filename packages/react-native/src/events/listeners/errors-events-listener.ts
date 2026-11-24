@@ -82,7 +82,8 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
 
   constructor(
     deps: ListenerDeps<RNExtraEventType>,
-    private readonly native?: Pick<GroundcoverNativeModule, "writePendingCrashReport"> | null
+    private readonly native?: Pick<GroundcoverNativeModule, "writePendingCrashReport"> | null,
+    private readonly onFatalSaved?: () => void
   ) {
     super(deps);
   }
@@ -115,17 +116,24 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
     }
   }
 
-  private persistFatal(id: string, event: BaseEvent): boolean {
+  private persistFatal(id: string, fatal: BaseEvent): boolean {
     try {
       if (!this.native?.writePendingCrashReport) return false;
       const session = this.eventsPool.getSessionAttributes();
       if (!session.session_id) return false;
+      // The queued events would be sent under this same session, so they are saved with the fatal.
       const record: PendingJsFatal<BaseEvent> = {
         jsFatalId: id,
-        event,
+        events: [...this.eventsPool.getPendingEvents(), fatal],
         sessionSnapshotJson: JSON.stringify(session),
       };
-      return this.native.writePendingCrashReport(id, JSON.stringify(record)) === true;
+      const saved = this.native.writePendingCrashReport(id, JSON.stringify(record)) === true;
+      if (saved) {
+        // The file now holds these events; the queue must not send them a second time.
+        this.eventsPool.discardBuffer();
+        this.onFatalSaved?.();
+      }
+      return saved;
     } catch (failure) {
       reportSafely(failure);
       return false;

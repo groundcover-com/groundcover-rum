@@ -168,6 +168,12 @@ export class EventsPool<TType extends string = string> {
     this.clearBuffer();
   }
 
+  // The buffered events as flush() would send them. With discardBuffer(), a host
+  // can move the batch to durable storage instead of sending it.
+  getPendingEvents(): BaseEvent<TType>[] {
+    return this.pending.toSend();
+  }
+
   // Every place the buffer is emptied goes through here.
   private clearBuffer(): void {
     this.pending = this.newBatch();
