@@ -174,7 +174,7 @@ Batching and delivery of outgoing events.
 
 ### `options.errors`
 
-How errors are reported. From `2.3.0-rc.0` (`npm install @groundcover/browser@rc`).
+How errors are reported. From `2.3.0`.
 
 | Option | Type | Default | Description |
 |---|---|---|---|
