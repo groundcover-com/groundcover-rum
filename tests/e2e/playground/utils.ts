@@ -165,13 +165,20 @@ export async function validateRumEvent(
  * Start collecting every RUM batch the page sends. Returns an array that fills
  * as requests go out — combine with `collectedEvents` + `expect.poll` to wait
  * for a specific event across batches (privacy redaction can land in any batch).
+ *
+ * Each batch is collected once. A request the browser rejects is sent again,
+ * with the same bytes, and the playground's default collector isn't running,
+ * so every request is rejected and every batch goes out twice. Two different
+ * batches never have the same bytes: every event has a random id.
  */
 export function collectRumBatches(page: Page): any[] {
   const batches: any[] = [];
+  const seen = new Set<string>();
   page.on('request', (request) => {
     if (request.url().includes('json/rum')) {
       const data = request.postData();
-      if (data) {
+      if (data && !seen.has(data)) {
+        seen.add(data);
         try {
           batches.push(JSON.parse(data));
         } catch {

@@ -200,6 +200,19 @@ describe("wire-format golden contract", () => {
     expect(names).toContain("compressed-probe");
   });
 
+  // Not only the send when the page is hidden: the visitor may leave while any batch is in
+  // flight, and the browser cancels an ordinary request with the page.
+  it("sends a batch sent while the visitor is on the page as a keepalive request too", async () => {
+    const sdk = initSDK();
+    simulatePresence();
+
+    sdk.sendCustomEvent({ event: "keepalive-probe", attributes: {} });
+    await drainAsyncSends();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: "POST", keepalive: true });
+  });
+
   // The core unit test for the retained-buffer candidate INJECTS the pool
   // timestamp, which proves the resolver's selection but not the flow. This
   // drives the real thing end to end — start with no cluster so flush()

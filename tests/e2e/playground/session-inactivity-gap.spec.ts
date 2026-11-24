@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import PlaygroundPage from "./playground.page";
-import { EventType } from "./utils";
+import { EventType, collectRumBatches } from "./utils";
 
 /**
  * Guards against "events but no recording" ghost sessions: a tab idle past
@@ -25,16 +25,7 @@ test.describe("RUM SDK | Session inactivity gap", () => {
   test("rotates session id and resumes replay on the first activity after a 30-minute idle gap", async ({ page }) => {
     await page.clock.install({ time: new Date() });
 
-    const requestBodies: any[] = [];
-    page.on("request", (request) => {
-      if (request.url().includes("json/rum")) {
-        try {
-          requestBodies.push(JSON.parse(request.postData() || "{}"));
-        } catch {
-          /* ignore parse errors */
-        }
-      }
-    });
+    const requestBodies: any[] = collectRumBatches(page);
 
     await page.goto(process.env.PLAYGROUND_URL || "http://localhost:4173");
     const playgroundPage = new PlaygroundPage(page);

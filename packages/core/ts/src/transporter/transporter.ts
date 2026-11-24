@@ -54,21 +54,7 @@ export interface BatchRequest {
 // so a slow network can't stall a flush. It only attaches handlers: a
 // rejection is logged, and a resolved response with a 401 or 403 `status`
 // warns once (fetch resolves rather than rejects on 4xx and 5xx).
-//
-// `options` is passed only for a lifecycle send (EventsPool.flush({ lifecycle:
-// true }): the host is hidden or torn down, or forced the send for another
-// reason, such as React Native after a fatal error), so the platform can ask
-// its network layer to let the request outlive the page or process (the
-// browser's fetch `keepalive`). A sender with no such thing ignores it.
-export interface BatchSendOptions {
-  lifecycle: true;
-}
-
-export type BatchSender = (
-  endpoint: string,
-  request: BatchRequest,
-  options?: BatchSendOptions
-) => Promise<unknown>;
+export type BatchSender = (endpoint: string, request: BatchRequest) => Promise<unknown>;
 
 export interface TransporterDeps {
   config: ConfigManager;
@@ -149,12 +135,11 @@ export class Transporter {
         "Content-Encoding": isCompressed ? "gzip" : "",
       };
 
-      const request: BatchRequest = { method: "POST", headers, body: finalData };
-      // The third argument only on the lifecycle path (as flush() passes
-      // { lifecycle } here): an ordinary send reaches the sender as it always has.
-      (lifecycle
-        ? this.sendBatch(endpoint, request, { lifecycle: true })
-        : this.sendBatch(endpoint, request))
+      this.sendBatch(endpoint, {
+        method: "POST",
+        headers,
+        body: finalData,
+      })
         .then(response => this.warnIfKeyRefused(response, endpoint))
         .catch(error => {
           this.logger.log("Network error while sending batch:", error, { groundcoverIgnore: true });

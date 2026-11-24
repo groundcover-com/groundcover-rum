@@ -82,7 +82,6 @@ export {
   type AsyncEncoder,
   type EncodedPayload,
   type BatchSender,
-  type BatchSendOptions,
   type BatchRequest,
 } from "./transporter/transporter";
 

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import PlaygroundPage from "./playground.page";
-import { EventType } from "./utils";
+import { EventType, collectRumBatches } from "./utils";
 
 /**
  * Ghost sessions = backend sessions that carry a few events (background
@@ -31,17 +31,7 @@ type CapturedBatch = {
 };
 
 function captureRumBatches(page: Page): CapturedBatch[] {
-  const batches: CapturedBatch[] = [];
-  page.on("request", (request) => {
-    if (request.url().includes("json/rum")) {
-      try {
-        batches.push(JSON.parse(request.postData() || "{}"));
-      } catch {
-        /* ignore parse errors */
-      }
-    }
-  });
-  return batches;
+  return collectRumBatches(page);
 }
 
 // Fire background traffic with NO user interaction: a programmatic custom event
