@@ -12,8 +12,6 @@ export type StackFrame = { filename: string; function: string; lineno: number; c
 export interface ErrorCaptureOptions {
   /** Reported by the app (captureException) rather than caught by the SDK. */
   handled?: boolean;
-  /** Apply error masking to diagnostic names and paths before durable storage. */
-  scrubDiagnostics?: boolean;
   metadata?: Record<string, unknown>;
 }
 
@@ -71,21 +69,12 @@ export function shapeErrorEvent(
     capturedJson === undefined ? options?.metadata : { captured_value: capturedJson, ...options?.metadata };
   const safeMetadata = shouldMask && metadata ? redactObject(metadata, opts) : metadata;
 
-  const scrubDiagnostics = shouldMask && options?.scrubDiagnostics;
-  const name = scrubDiagnostics ? redactText(error.name, opts) : error.name;
-  const frames = parseErrorStack(error);
   const attributes: ErrorEventAttributes = {
-    error_type: name || "Error",
+    error_type: error.name || "Error",
     // Capped like log messages; the fingerprint below takes the first 400.
     error_message: truncate({ text: safeMessage }),
-    error_stacktrace: scrubDiagnostics
-      ? frames.map(frame => ({
-          ...frame,
-          function: redactText(frame.function, opts),
-          filename: redactText(frame.filename, opts),
-        }))
-      : frames,
-    error_fingerprint: `${name}:${truncate({ text: safeMessage, maxLength: 400 })}`,
+    error_stacktrace: parseErrorStack(error),
+    error_fingerprint: `${error.name}:${truncate({ text: safeMessage, maxLength: 400 })}`,
     error_handled: options?.handled || false,
     error_metadata: safeMetadata,
   };

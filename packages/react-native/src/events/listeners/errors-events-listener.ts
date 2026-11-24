@@ -67,14 +67,8 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
 
   captureFatal(error: unknown, atMs: number): void {
     try {
-      const event = this.buildEvent(coerceToError(error), { handled: false, scrubDiagnostics: true }, msToNs(atMs));
+      const event = this.buildEvent(coerceToError(error), { handled: false }, msToNs(atMs));
       const id = event.id;
-      event.attributes = {
-        ...event.attributes,
-        "error_metadata.fatal": true,
-        "error_metadata.native": false,
-        "error_metadata.crash_report_id": id,
-      };
       this.eventsPool.addEvent(event, accepted => this.persistFatal(id, accepted));
     } finally {
       this.eventsPool.flush({ lifecycle: true });
