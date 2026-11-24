@@ -122,6 +122,10 @@ they need, and always report one gate check named after the lane; `Core CI` is a
 runs in full on every pull request. `Core CI` and `Web CI` run only for pull requests into `main`,
 so a PR stacked on another branch reports them once it is retargeted to `main`.
 
+Which paths run a lane is written once, in the [`dorny/paths-filter`](https://github.com/dorny/paths-filter)
+step of the lane's `changes` job, and holds for pull requests and pushes to `main` alike; only
+`Web CI` runs in full on every push to `main`.
+
 | Workflow | Gate check | Covers |
 | --- | --- | --- |
 | [`core.yml`](.github/workflows/core.yml) | `Core CI` | The TypeScript core |

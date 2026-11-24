@@ -5,40 +5,19 @@ name: Native Android CI
 # packages/core/kotlin, and its playground (apps/android-playground), which the shared Mobilewright
 # suite drives with APP=native. Shaped like flutter.yml, for the same reasons:
 #
-# - `push` is scoped to main and path-filtered at the trigger; `pull_request` is NOT.
-#   `Native Android CI` at the bottom is the lane's check to require, and a workflow
-#   skipped by a trigger-level path filter creates no check run at all, which would block every
-#   PR that doesn't touch Android. So on PRs the workflow always starts, `changes` decides
-#   whether the work runs, and `gate` always reports. Full reasoning in
-#   .github/actions/changed-paths.
-# - The `changes` filter fails CLOSED (a positive list), like the RN and Flutter lanes'.
+# - `push` is scoped to main, and neither trigger is path-filtered. `Native Android CI` at the
+#   bottom is the lane's check to require, and a workflow skipped by a trigger-level path filter
+#   creates no check run at all, which would block every PR that doesn't touch Android. So the
+#   workflow always starts, `changes` decides whether the work runs, and `gate` always reports.
+# - `changes` filters on a positive list of paths, failing CLOSED, like the RN and Flutter
+#   lanes'.
 #
 # iOS has a workflow of its own (native-ios.yml), so an Android-only change spends no macOS
 # minutes and an iOS-only change never waits on emulators.
 on:
   push:
     branches: [main]
-    paths:
-      - 'packages/android/**'
-      - 'apps/android-playground/**'
-      # The Kotlin engine the library compiles, and its unit-test steps (shared with
-      # react-native.yml and flutter.yml).
-      - 'packages/core/kotlin/**'
-      - '.github/actions/engine-tests-kotlin/**'
-      # The wire contract and the shared e2e suite, which the native lanes run too, with the
-      # suite's root config, the Mobilewright patch and the install it runs from.
-      - 'packages/core/wire/**'
-      - 'tests/e2e/mobile/**'
-      - 'mobilewright.config.ts'
-      - 'patches/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - '.editorconfig'
-      - '.github/workflows/native-android.yml'
-      - '.github/actions/changed-paths/**'
-      #
-      # THIS LIST AND THE `changes` JOB'S PATTERN LIST MUST AGREE: one policy in two syntaxes.
+  # No `paths:` on either trigger, on purpose — see the header.
   pull_request:
   workflow_dispatch:
 
@@ -66,49 +45,45 @@ jobs:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
-      android: ${{ steps.filter.outputs.android }}
+      # 'true' when the filter didn't run: see its `if:`.
+      android: ${{ steps.filter.outputs.android || 'true' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # How the files are listed, and when the filter is skipped: react-native.yml.
+      - if: ${{ github.event_name == 'push' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/actions/changed-paths
-      - id: paths
-        uses: ./.github/actions/changed-paths
-      - name: Decide whether the native Android lane runs
-        id: filter
-        env:
-          FILES: ${{ steps.paths.outputs.files-path }}
-          IS_PR: ${{ steps.paths.outputs.is-pull-request }}
-        run: |
-          set -euo pipefail
-          if [ "$IS_PR" != 'true' ]; then
-            echo 'not a PR — the trigger already filtered this'
-            echo 'android=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Keep in sync with the `push` trigger's paths: list above.
-          if grep -qE \
-              -e '^packages/android/' \
-              -e '^apps/android-playground/' \
-              -e '^packages/core/kotlin/' \
-              -e '^\.github/actions/engine-tests-kotlin/' \
-              -e '^packages/core/wire/' \
-              -e '^tests/e2e/mobile/' \
-              -e '^mobilewright\.config\.ts$' \
-              -e '^patches/' \
-              -e '^package\.json$' \
-              -e '^pnpm-lock\.yaml$' \
-              -e '^pnpm-workspace\.yaml$' \
-              -e '^\.editorconfig$' \
-              -e '^\.github/workflows/native-android\.yml$' \
-              -e '^\.github/actions/changed-paths/' \
-              "$FILES"; then
-            echo 'native-Android-relevant changes found — running the lane'
-            echo 'android=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'no native-Android-relevant changes — skipping the lane'
-            echo 'android=false' >> "$GITHUB_OUTPUT"
-          fi
+      - id: filter
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.changed_files < 3000) }}
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          # A file counts when it matches a path below and none of the `!` ones.
+          predicate-quantifier: some-with-excludes
+          filters: |
+            android:
+              - 'packages/android/**'
+              - 'apps/android-playground/**'
+              # The Kotlin engine the library compiles, and its unit-test steps (shared with
+              # react-native.yml and flutter.yml).
+              - 'packages/core/kotlin/**'
+              - '.github/actions/engine-tests-kotlin/**'
+              # The wire contract and the shared e2e suite, which the native lanes run too, with
+              # the suite's root config, the Mobilewright patch and the install it runs from.
+              - 'packages/core/wire/**'
+              - 'tests/e2e/mobile/**'
+              - 'mobilewright.config.ts'
+              - 'patches/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.npmrc'
+              # ktlint reads it.
+              - '.editorconfig'
+              - '.github/workflows/native-android.yml'
+
+              # Markdown and the licences, which nothing this lane builds or runs reads.
+              - '!**/*.md'
+              - '!**/LICENSE'
 
   # ktlint, Android lint, the API files and the unit tests, then the release AARs, in one Gradle
   # run over every module (the SDK and its Compose, OkHttp and Timber integrations): they share
