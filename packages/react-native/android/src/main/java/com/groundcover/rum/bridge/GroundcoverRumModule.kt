@@ -21,7 +21,8 @@ import com.groundcover.rum.engine.GcRumEngineStatus
  * Thin adapter: JSON in, JSON out, engine in the middle. No capture logic here, so the engine
  * stays usable without React Native.
  *
- * RN interop exposes this classic module on both architectures.
+ * A classic NativeModule rather than a TurboModule: the interop layer our >= 0.74 peer
+ * guarantees makes codegen pure overhead.
  */
 class GroundcoverRumModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {

@@ -10,7 +10,6 @@ import {
   type ErrorCaptureOptions,
   type CoreEventType,
 } from "@groundcover/rum-core";
-import { observeGlobalErrors } from "../../platform/global-errors";
 import { reportSafely } from "../../internal/report-safely";
 import type { GroundcoverNativeModule, PendingJsFatal } from "../../platform/native-types";
 import type { RNExtraEventType } from "../rn-event-types";
@@ -26,6 +25,47 @@ import { loadRejectionTracking } from "../../platform/optional-modules";
 //
 // Version-fragile, like fiber-walk: every access is guarded, the handlers are idempotent
 // and best-effort restorable, and any failure degrades to "no error capture".
+
+type GlobalErrorHandler = (error: unknown, isFatal?: boolean) => void;
+
+// The subset of RN's global ErrorUtils we use, typed structurally so the SDK
+// never hard-depends on react-native's ambient globals.
+type ErrorUtilsLike = {
+  getGlobalHandler?: () => GlobalErrorHandler | undefined;
+  setGlobalHandler?: (handler: GlobalErrorHandler) => void;
+};
+
+export function observeGlobalErrors(capture: GlobalErrorHandler): (() => void) | undefined {
+  try {
+    const utils = (globalThis as { ErrorUtils?: ErrorUtilsLike }).ErrorUtils;
+    if (typeof utils?.getGlobalHandler !== "function" || typeof utils.setGlobalHandler !== "function") {
+      return undefined;
+    }
+    const previous = utils.getGlobalHandler();
+    let active = true;
+    const handler: GlobalErrorHandler = (error, fatal) => {
+      try {
+        if (active) capture(error, fatal);
+      } catch (failure) {
+        reportSafely(failure);
+      } finally {
+        previous?.(error, fatal);
+      }
+    };
+    utils.setGlobalHandler(handler);
+    return () => {
+      active = false;
+      try {
+        if (utils.getGlobalHandler?.() === handler) utils.setGlobalHandler?.(previous ?? (() => {}));
+      } catch (failure) {
+        reportSafely(failure);
+      }
+    };
+  } catch (failure) {
+    reportSafely(failure);
+    return undefined;
+  }
+}
 
 // The engine rejection tracker's shape (same options object on Hermes' native
 // tracker and the JSC `promise` polyfill module).

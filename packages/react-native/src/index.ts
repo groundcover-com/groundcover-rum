@@ -2,7 +2,7 @@ import { Logger, type UserIdentifiers } from "@groundcover/rum-core";
 import { reportSafely } from "./internal/report-safely";
 
 import { RNSessionManager } from "./session-manager/session-manager";
-import { observeGlobalErrors } from "./platform/global-errors";
+import { observeGlobalErrors } from "./events/listeners/errors-events-listener";
 import { HydratedStorage } from "./platform/hydrated-storage";
 import { RNLogger } from "./logger/logger";
 import { clearTouchHistory, setTouchHandlers } from "./internal/touch-bridge";

@@ -207,6 +207,12 @@ describe("ErrorsEventsListener", () => {
     listener.initialize();
 
     expect(setSpy).not.toHaveBeenCalled();
+    (globalThis as { ErrorUtils?: unknown }).ErrorUtils = {
+      getGlobalHandler: () => undefined,
+      setGlobalHandler: setSpy,
+    };
+    listener.initialize();
+    expect(setSpy).toHaveBeenCalledOnce();
     listener.destroy();
   });
 

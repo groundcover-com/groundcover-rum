@@ -291,7 +291,10 @@ final class GCRumSessionSnapshotStore {
         // …UntilFirstUserAuthentication, not `.complete`: under `.complete` a write fails
         // while the device is locked, which is exactly when the background flush runs.
         do {
-            try Data(contents.utf8).write(to: target, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            try Data(contents.utf8).write(
+                to: target,
+                options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+            )
             return true
         } catch {
             return false
