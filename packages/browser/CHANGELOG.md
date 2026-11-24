@@ -4,10 +4,10 @@ All notable changes to `@groundcover/browser` are documented here. This project 
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
-## [2.3.0-rc.0] — 2026-11-19
+## [2.3.0] — 2026-11-24
 
-Release candidate for `2.3.0`, published under the `rc` tag. Repeated identical errors are now
-merged by default; see Changed.
+Repeated identical errors are now merged by default; see Changed. The same code as `2.3.0-rc.0`,
+now published under `latest`.
 
 ### Added
 
@@ -27,6 +27,10 @@ merged by default; see Changed.
   batches by itself: it goes out with the batch, on `transport.batchTimeout` or when other events
   fill it. Events without the field stand for one, so the total is the sum of the field; exception
   and error-log counts that count events rather than summing it will read lower.
+
+## [2.3.0-rc.0] — 2026-11-19
+
+Release candidate for `2.3.0`, published under the `rc` tag. Its changes are listed under `2.3.0`.
 
 ## [2.2.3] — 2026-11-17
 
