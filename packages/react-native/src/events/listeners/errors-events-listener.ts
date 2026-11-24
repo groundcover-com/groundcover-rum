@@ -6,6 +6,7 @@ import {
   msToNs,
   type ListenerDeps,
   type BaseEvent,
+  type DedupeableEvent,
   type EnrichedEvent,
   type ErrorCaptureOptions,
   type CoreEventType,
@@ -79,6 +80,8 @@ type RejectionTrackingModule = { enable?: (options: RejectionOptions) => void; d
 
 export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
   private stopObserving?: () => void;
+  // Dedup keys of the fatal errors that already have a file in this run.
+  private readonly savedFatals = new Set<number>();
 
   constructor(
     deps: ListenerDeps<RNExtraEventType>,
@@ -110,13 +113,15 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
     try {
       const event = this.buildEvent(coerceToError(error), { handled: false }, msToNs(atMs));
       const id = event.id;
-      this.eventsPool.addEvent(event, accepted => this.persistFatal(id, accepted));
+      // A fatal that already has a file is a repeat: the queue counts it, as on main.
+      const hasFile = event.dedup !== undefined && this.savedFatals.has(event.dedup.key);
+      this.eventsPool.addEvent(event, hasFile ? undefined : accepted => this.persistFatal(id, accepted, event.dedup?.key));
     } finally {
       this.eventsPool.flush({ lifecycle: true });
     }
   }
 
-  private persistFatal(id: string, fatal: BaseEvent): boolean {
+  private persistFatal(id: string, fatal: BaseEvent, dedupKey?: number): boolean {
     try {
       if (!this.native?.writePendingCrashReport) return false;
       const session = this.eventsPool.getSessionAttributes();
@@ -129,6 +134,7 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
       };
       const saved = this.native.writePendingCrashReport(id, JSON.stringify(record)) === true;
       if (saved) {
+        if (dedupKey !== undefined) this.savedFatals.add(dedupKey);
         // The file now holds these events; the queue must not send them a second time.
         this.eventsPool.discardBuffer();
         this.onFatalSaved?.();
@@ -230,7 +236,7 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
     error: Error,
     config?: ErrorCaptureOptions,
     timestamp?: number
-  ): EnrichedEvent<CoreEventType | RNExtraEventType> {
+  ): DedupeableEvent<CoreEventType | RNExtraEventType> {
     const shaped = shapeErrorEvent(error, config, this.config.getPrivacy());
     return this.enricher.enrich({ ...shaped, timestamp });
   }

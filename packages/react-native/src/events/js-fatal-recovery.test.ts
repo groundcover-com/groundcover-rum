@@ -152,6 +152,25 @@ describe("fatal JS recovery", () => {
     expect(batch.events).toEqual(saved.events);
   });
 
+  it("writes one file for a fatal that repeats in the same run", async () => {
+    const { fatal, native } = fixture();
+    groundcover.init({ ...config, options });
+    await __whenReady();
+    const repeating = new Error("repeating failure");
+    fatal(repeating);
+    fatal(repeating);
+    fatal(repeating);
+    fatal(new Error("other failure"));
+    expect(native.writePendingCrashReport).toHaveBeenCalledTimes(2);
+    const [, json] = native.writePendingCrashReport.mock.calls[1]!;
+    const saved = JSON.parse(json) as PendingJsFatal<BaseEvent>;
+    // The repeats waited in the queue, counted on one event, and were saved with the next fatal.
+    expect(saved.events.map(event => [event.attributes?.error_message, event.attributes?.error_repeat_count])).toEqual([
+      ["repeating failure", 2],
+      ["other failure", undefined],
+    ]);
+  });
+
   it("reconciles the session before committing the crash", async () => {
     const { native, fatal } = fixture();
     const now = vi.spyOn(Date, "now");
