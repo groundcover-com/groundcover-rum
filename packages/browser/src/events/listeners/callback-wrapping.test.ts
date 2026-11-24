@@ -5,6 +5,22 @@ type BrowserSdk = (typeof import("../../index"))["default"];
 type HostFunction = (this: unknown, ...args: unknown[]) => unknown;
 type Scheduler = (callback: HostFunction) => void;
 
+// The test runner's frames are file paths, which the third-party check leaves
+// out. A test that needs real stacks with web addresses sets `map`, and every
+// stack the wrapping module parses has its file names rewritten through it.
+const stackRewrite = vi.hoisted(() => ({ map: null as null | ((filename: string) => string) }));
+vi.mock("@groundcover/rum-core/events/errors/shape-error", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@groundcover/rum-core/events/errors/shape-error")>();
+  return {
+    ...real,
+    parseErrorStack: (error: Error) => {
+      const frames = real.parseErrorStack(error);
+      const map = stackRewrite.map;
+      return map ? frames.map((frame) => ({ ...frame, filename: map(frame.filename) })) : frames;
+    },
+  };
+});
+
 // The host's timers are stubbed so a test holds the callback the SDK handed
 // the host and runs it itself, as the host would. Only calls with this delay
 // are held; the SDK's own timers are scheduled for real.
@@ -60,7 +76,9 @@ describe("callback wrapping (errors the browser hides)", () => {
     Object.defineProperty(document, "scripts", { get: () => scripts, configurable: true });
     reportShows = "hidden";
     Object.defineProperty(globalThis, "reportError", {
-      value: (value: unknown) => {
+      value: (...args: unknown[]) => {
+        if (args.length === 0) throw new TypeError("reportError: 1 argument required");
+        const value = args[0];
         window.dispatchEvent(
           reportShows === "hidden"
             ? new ErrorEvent("error", { error: null, message: "Script error." })
@@ -105,6 +123,7 @@ describe("callback wrapping (errors the browser hides)", () => {
   });
 
   afterEach(() => {
+    stackRewrite.map = null;
     sdk.logger.manager?.destroy();
     vi.restoreAllMocks();
     for (const [target, key, descriptor] of savedSlots) {
@@ -458,6 +477,45 @@ describe("callback wrapping (errors the browser hides)", () => {
       expect(exceptions()).toHaveLength(1);
     });
 
+    it("reports a third-party-only stack as long as the engine keeps, which may be cut short", () => {
+      init();
+      scripts = [script(WIDGET)];
+      const limit = Error.stackTraceLimit;
+      Error.stackTraceLimit = 3;
+      try {
+        throwFromCallback(errorIn("deep in the widget", WIDGET, WIDGET, WIDGET));
+        hiddenError();
+      } finally {
+        Error.stackTraceLimit = limit;
+      }
+
+      expect(exceptions()).toHaveLength(1);
+    });
+
+    it("leaves the wrappers' own frames out of a real stack", () => {
+      // This file stands for the widget, the SDK's module for the SDK's own
+      // script on the page's origin. The wrapper's frame is the SDK's, so
+      // unless it is recognised and left out, the error looks like the app's.
+      const sdkScript = new URL("/sdk.js", location.href).href;
+      stackRewrite.map = (file) =>
+        file.includes("callback-wrapping.test") ? WIDGET : file.includes("callback-wrapping") ? sdkScript : file;
+      const limit = Error.stackTraceLimit;
+      Error.stackTraceLimit = 100;
+      try {
+        init();
+        scripts = [script(WIDGET)];
+        setTimeout(function widgetTick() {
+          throw new Error("thrown by the widget");
+        }, HELD);
+        runHeld();
+        hiddenError();
+      } finally {
+        Error.stackTraceLimit = limit;
+      }
+
+      expect(exceptions()).toHaveLength(0);
+    });
+
     it("reports a third-party error the browser shows without a wrapper, as before", () => {
       init();
       scripts = [script(WIDGET)];
@@ -476,6 +534,14 @@ describe("callback wrapping (errors the browser hides)", () => {
 
       expect(exceptions()).toHaveLength(1);
       expect(exceptions()[0]!.attributes?.error_message).toBe("reported by a framework");
+    });
+
+    it("forgets the value when the call throws instead of reporting", () => {
+      init();
+      expect(() => (reportError as unknown as () => void)()).toThrow(TypeError);
+      hiddenError();
+
+      expect(exceptions()).toHaveLength(0);
     });
 
     it("reports a value the browser shows in full once", () => {

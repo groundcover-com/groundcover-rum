@@ -663,23 +663,39 @@ it again unchanged, then reports it, with its real type, message and stack, when
 `"Script error."` event arrives. A browser that shows the error in full reports it as it always did,
 and an error is never sent twice. This is part of the `exceptions` listener.
 
-- **Third-party scripts stay unreported.** Every browser hides the errors of a script from another
-  origin loaded without `crossorigin`, such as a widget, an ad or a tag manager. The SDK's try/catch
-  sees them anyway, so it drops an error when every frame of its stack is in such a script. An error
-  with your own code anywhere in its stack is reported.
+- **Errors from third-party scripts are left out.** Every browser hides the errors of a script from
+  another origin loaded without `crossorigin`, such as a widget, an ad or a tag manager. The SDK's
+  try/catch sees them anyway, so it drops an error when every frame of its stack is in such a script,
+  recognised by its `<script>` tag. An error with your own code anywhere in its stack is reported.
+  Some still get through: a script that removes its tag after it runs, a script whose address
+  redirects (the stack shows the final address, the tag the first), and code named with
+  `//# sourceURL`. An error your code triggers by calling into such a script is reported, also when
+  the browser cut its stack short, with one exception: Safari leaves out the frame of a callback that
+  ends by returning the call, such as `() => widget.open()`, so that error looks like the script's
+  own and is left out.
+- **Load your own scripts with `crossorigin`.** The SDK can't tell your scripts from a third party's,
+  so if your bundles come from another origin, such as a CDN or a `static.` subdomain, without
+  `crossorigin`, their errors are left out the same way, in every browser. Add
+  `crossorigin="anonymous"` to their `<script>` tags and serve them with an
+  `Access-Control-Allow-Origin` header. Chrome and Firefox then show their other errors in full too.
 - **Start the SDK before your app renders.** Only callbacks registered after `init` are wrapped.
   Listeners added before it (such as the ones your framework adds when it first renders) and a copy
   of `setTimeout` saved before it stay unwrapped, so their errors stay hidden on Safari. Callbacks
   registered another way, such as an `onclick` property or a `MutationObserver`, aren't wrapped.
 - **React 19** reports the errors it catches in event handlers and rendering through `reportError`,
-  which it looks up when `react-dom` loads. For Safari to report them, call `init` in a module that
-  is imported before `react-dom`:
+  which it looks up when `react-dom` loads. For Safari to report them, `init` must run before
+  `react-dom` loads: call it in a module imported before `react-dom`.
 
   ```ts
   // main.tsx
   import "./groundcover"; // calls groundcover.init(...)
   import { createRoot } from "react-dom/client";
   ```
+
+  Frameworks that load `react-dom` before your code, such as Next.js, leave no such place, so on
+  Safari those errors stay hidden. Rendering errors can still be reported through React's root
+  options, for example `onUncaughtError: (error) => groundcover.captureException(error)` where you
+  create the root; event-handler errors have no such hook.
 
 - **Listeners behave as before.** Adding the same listener twice registers it once, and
   `removeEventListener` removes it. A listener added before `init` and again after it stays

@@ -128,15 +128,28 @@ export function forgetRethrown(value: unknown): boolean {
  * Whether every frame of the error's stack, the wrappers' own left out, is in
  * a script whose errors the browser hides from the page. An error with a
  * frame anywhere else (the app's code, a script loaded with `crossorigin`, a
- * module), or with no stack, is reported. Never throws.
+ * module), with no stack, or with a stack the engine may have cut short, is
+ * reported. Never throws.
  */
 export function fromHiddenScriptsOnly(error: Error): boolean {
   try {
+    const stack = parseErrorStack(error);
+    // A stack as long as the engine keeps (Chrome keeps 10 frames) may have
+    // lost its oldest frames, the app's callback among them, so it can't
+    // show the error came only from hidden scripts.
+    const limit = (Error as { stackTraceLimit?: unknown }).stackTraceLimit;
+    if (typeof limit === "number" && stack.length >= limit) return false;
     const wrappers = wrapperSites();
-    const frames = parseErrorStack(error).filter(
-      (frame) => isAddress(frame.filename) && !wrappers.has(siteOf(frame))
-    );
-    return frames.length > 0 && frames.every((frame) => isHiddenScript(frame.filename));
+    const files = new Set<string>();
+    for (const frame of stack) {
+      if (isAddress(frame.filename) && !wrappers.has(siteOf(frame))) files.add(frame.filename);
+    }
+    if (files.size === 0) return false;
+    const hidden = hiddenScripts();
+    for (const file of files) {
+      if (!hidden(file)) return false;
+    }
+    return true;
   } catch (failure) {
     handleError(failure);
     return false;
@@ -149,30 +162,32 @@ function isAddress(filename: string): boolean {
   return /^https?:\/\//i.test(filename);
 }
 
-// Whether the browser hides errors from the script at this address: a
-// classic script from another origin that no <script> element loaded with
+// Whether the browser hides errors from the script at an address: a classic
+// script from another origin that no <script> element loaded with
 // `crossorigin`. An address no <script> element has (a module's import, a
-// script removed after it ran) counts as visible, so an error from the app's
-// own code is never dropped for want of an element.
-function isHiddenScript(filename: string): boolean {
+// script removed after it ran, a redirect's final address) counts as visible,
+// so an error from the app's own code is never dropped for want of an
+// element. The page's scripts are read once per error, not once per frame.
+function hiddenScripts(): (filename: string) => boolean {
   const page = _globalThis.location;
   const scripts = _globalThis.document?.scripts;
-  if (!page || !scripts) return false;
-  let address: URL;
-  try {
-    address = new URL(filename);
-  } catch {
-    return false;
-  }
-  if (address.origin === page.origin) return false;
-  const target = withoutHash(address.href);
-  let found = false;
+  if (!page || !scripts) return () => false;
+  // Address → whether every element loading it is a hidden classic script.
+  const elements = new Map<string, boolean>();
   for (const script of Array.from(scripts)) {
-    if (!script.src || withoutHash(script.src) !== target) continue;
-    if (script.type === "module" || script.hasAttribute("crossorigin")) return false;
-    found = true;
+    if (!script.src) continue;
+    const src = withoutHash(script.src);
+    const hidden = script.type !== "module" && !script.hasAttribute("crossorigin");
+    elements.set(src, (elements.get(src) ?? true) && hidden);
   }
-  return found;
+  return (filename) => {
+    try {
+      const address = new URL(filename);
+      return address.origin !== page.origin && elements.get(withoutHash(address.href)) === true;
+    } catch {
+      return false;
+    }
+  };
 }
 
 function withoutHash(href: string): string {
@@ -276,8 +291,16 @@ function reportErrorPatch(): PatchSpec<HostFunction> {
     },
     wrap: (original) =>
       function (this: unknown, ...args: unknown[]) {
-        if (owner) noteRethrown(args[0]);
-        return original.apply(this, args);
+        if (!owner) return original.apply(this, args);
+        noteRethrown(args[0]);
+        try {
+          return original.apply(this, args);
+        } catch (failure) {
+          // Thrown instead of reported (no argument, a wrong `this`): no event
+          // will take the value, so it must not wait for a later one.
+          forgetRethrown(args[0]);
+          throw failure;
+        }
       },
   };
 }
