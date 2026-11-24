@@ -51,6 +51,13 @@ const DELIVERY_DEADLINE_MS = RN_SEND_TIMEOUT_MS + 5_000;
 // flight — both would read the same un-acked records and send them twice.
 let drainInFlight: Promise<void> | null = null;
 
+// The copy of the fatal file this run wrote, kept until that file is sent.
+let unsentFatal: PendingJsFatal<BaseEvent> | undefined;
+export const getUnsentFatal = (): PendingJsFatal<BaseEvent> | undefined => unsentFatal;
+export const keepUnsentFatal = (record: PendingJsFatal<BaseEvent>): void => {
+  unsentFatal = record;
+};
+
 export interface DrainDeps {
   config: ConfigManager;
   idGenerator: IdGenerator;
@@ -73,6 +80,7 @@ export function drainNativeCrashReports(deps: DrainDeps): Promise<void> {
  *  be able to reset it between cases. */
 export function __resetDrainStateForTest(): void {
   drainInFlight = null;
+  unsentFatal = undefined;
 }
 
 async function runDrain(deps: DrainDeps): Promise<void> {
@@ -85,6 +93,7 @@ async function runDrain(deps: DrainDeps): Promise<void> {
       if (acked) {
         const id = "jsFatalId" in record ? record.jsFatalId : record.id;
         await clearPendingCrashReports(deps.native, [id]);
+        if (unsentFatal?.jsFatalId === id) unsentFatal = undefined;
       }
     } catch (error) {
       // Leave the record un-acked: whatever went wrong here, the next launch

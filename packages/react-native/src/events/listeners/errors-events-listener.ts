@@ -7,12 +7,14 @@ import {
   type ListenerDeps,
   type BaseEvent,
   type DedupeableEvent,
+  type DedupInfo,
   type EnrichedEvent,
   type ErrorCaptureOptions,
   type CoreEventType,
 } from "@groundcover/rum-core";
 import { reportSafely } from "../../internal/report-safely";
 import type { GroundcoverNativeModule, PendingJsFatal } from "../../platform/native-types";
+import { getUnsentFatal, keepUnsentFatal } from "../native-crash-drain";
 import type { RNExtraEventType } from "../rn-event-types";
 import { loadRejectionTracking } from "../../platform/optional-modules";
 
@@ -80,8 +82,8 @@ type RejectionTrackingModule = { enable?: (options: RejectionOptions) => void; d
 
 export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
   private stopObserving?: () => void;
-  // Dedup keys of the fatal errors that already have a file in this run.
-  private readonly savedFatals = new Set<number>();
+  // The first fatal of this run, which got the file. Later fatals get none.
+  private savedFatal?: { dedup?: DedupInfo };
 
   constructor(
     deps: ListenerDeps<RNExtraEventType>,
@@ -113,37 +115,52 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
     try {
       const event = this.buildEvent(coerceToError(error), { handled: false }, msToNs(atMs));
       const id = event.id;
-      // A fatal that already has a file is a repeat: the queue counts it, as on main.
-      const hasFile = event.dedup !== undefined && this.savedFatals.has(event.dedup.key);
-      this.eventsPool.addEvent(event, hasFile ? undefined : accepted => this.persistFatal(id, accepted, event.dedup?.key));
+      this.eventsPool.addEvent(event, accepted => this.persistFatal(id, accepted, event.dedup));
     } finally {
       this.eventsPool.flush({ lifecycle: true });
     }
   }
 
-  private persistFatal(id: string, fatal: BaseEvent, dedupKey?: number): boolean {
+  private persistFatal(id: string, fatal: BaseEvent, dedup?: DedupInfo): boolean {
     try {
       if (!this.native?.writePendingCrashReport) return false;
-      const session = this.eventsPool.getSessionAttributes();
-      if (!session.session_id) return false;
-      // The queued events would be sent under this same session, so they are saved with the fatal.
-      const record: PendingJsFatal<BaseEvent> = {
-        jsFatalId: id,
-        events: [...this.eventsPool.getPendingEvents(), fatal],
-        sessionSnapshotJson: JSON.stringify(session),
-      };
-      const saved = this.native.writePendingCrashReport(id, JSON.stringify(record)) === true;
-      if (saved) {
-        if (dedupKey !== undefined) this.savedFatals.add(dedupKey);
+      const record = this.savedFatal ? this.recordWithRepeat(this.savedFatal, dedup) : this.firstRecord(id, fatal);
+      if (!record) return false;
+      if (this.native.writePendingCrashReport(record.jsFatalId, JSON.stringify(record)) !== true) return false;
+      keepUnsentFatal(record);
+      if (!this.savedFatal) {
+        this.savedFatal = { dedup };
         // The file now holds these events; the queue must not send them a second time.
         this.eventsPool.discardBuffer();
         this.onFatalSaved?.();
       }
-      return saved;
+      return true;
     } catch (failure) {
       reportSafely(failure);
       return false;
     }
+  }
+
+  // First fatal of the run: the queued events, then the fatal. No record when there is no session yet.
+  private firstRecord(id: string, fatal: BaseEvent): PendingJsFatal<BaseEvent> | undefined {
+    const session = this.eventsPool.getSessionAttributes();
+    if (!session.session_id) return undefined;
+    // The queued events would be sent under this same session, so they are saved with the fatal.
+    return {
+      jsFatalId: id,
+      events: [...this.eventsPool.getPendingEvents(), fatal],
+      sessionSnapshotJson: JSON.stringify(session),
+    };
+  }
+
+  // The unsent copy with one more repeat on its fatal. No record when the file was sent or this is another fatal.
+  private recordWithRepeat(saved: { dedup?: DedupInfo }, dedup?: DedupInfo): PendingJsFatal<BaseEvent> | undefined {
+    const unsent = getUnsentFatal();
+    if (!unsent || dedup === undefined || dedup.key !== saved.dedup?.key) return undefined;
+    const fatal = unsent.events.at(-1)!;
+    const count = Number(fatal.attributes?.[dedup.countAttribute] ?? 1) + 1;
+    const counted = { ...fatal, attributes: { ...fatal.attributes, [dedup.countAttribute]: count } };
+    return { ...unsent, events: [...unsent.events.slice(0, -1), counted] };
   }
 
   // Install the engine's unhandled-rejection tracker. Single-slot per engine:

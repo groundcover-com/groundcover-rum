@@ -152,23 +152,57 @@ describe("fatal JS recovery", () => {
     expect(batch.events).toEqual(saved.events);
   });
 
-  it("writes one file for a fatal that repeats in the same run", async () => {
-    const { fatal, native } = fixture();
+  it("saves only the first fatal of a run, and queues later fatals once its file was sent", async () => {
+    const { fatal, files, native, send } = fixture();
     groundcover.init({ ...config, options });
     await __whenReady();
+    reportPresence(Date.now());
     const repeating = new Error("repeating failure");
     fatal(repeating);
-    fatal(repeating);
+    await vi.waitFor(() => expect(files.size).toBe(0));
     fatal(repeating);
     fatal(new Error("other failure"));
-    expect(native.writePendingCrashReport).toHaveBeenCalledTimes(2);
-    const [, json] = native.writePendingCrashReport.mock.calls[1]!;
-    const saved = JSON.parse(json) as PendingJsFatal<BaseEvent>;
-    // The repeats waited in the queue, counted on one event, and were saved with the next fatal.
-    expect(saved.events.map(event => [event.attributes?.error_message, event.attributes?.error_repeat_count])).toEqual([
-      ["repeating failure", 2],
-      ["other failure", undefined],
+    expect(native.writePendingCrashReport).toHaveBeenCalledOnce();
+    // The file carried the first fatal; the queue sends the repeat and the other fatal.
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3));
+    const sent = send.mock.calls.map(([, init]) => JSON.parse(strFromU8(init.body as Uint8Array)) as Batch);
+    expect(sent.map(batch => batch.events.map(event => event.attributes?.error_message))).toEqual([
+      ["repeating failure"],
+      ["repeating failure"],
+      ["other failure"],
     ]);
+  });
+
+  it("counts a repeat of the saved fatal in its file while the file is unsent", async () => {
+    const { fatal, files, native, send } = fixture();
+    send.mockResolvedValue({ ok: false });
+    groundcover.init({ ...config, options: { ...options, enabledEvents: ["exceptions", "logs"] } });
+    await __whenReady();
+    groundcover.logger.info("earlier log");
+    const repeating = new Error("repeating failure");
+    fatal(repeating);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+    fatal(repeating);
+    fatal(repeating);
+    reportPresence(Date.now());
+    fatal(new Error("other failure"));
+    // The same file was written again for each repeat; the other fatal got no file.
+    const writes = native.writePendingCrashReport.mock.calls;
+    expect(writes.map(([id]) => id)).toEqual([writes[0]![0], writes[0]![0], writes[0]![0]]);
+    expect(writes.map(([, json]) => {
+      const record = JSON.parse(json) as PendingJsFatal<BaseEvent>;
+      return record.events.at(-1)!.attributes?.error_repeat_count;
+    })).toEqual([undefined, 2, 3]);
+    expect(files.size).toBe(1);
+    const saved = JSON.parse(writes[2]![1]) as PendingJsFatal<BaseEvent>;
+    expect(saved.events.map(event => [event.type, event.attributes?.error_repeat_count])).toEqual([
+      ["log", undefined],
+      ["exception", 3],
+    ]);
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    const [, init] = send.mock.calls[1]!;
+    const queued = JSON.parse(strFromU8(init.body as Uint8Array)) as Batch;
+    expect(queued.events.map(event => event.attributes?.error_message)).toEqual(["other failure"]);
   });
 
   it("reconciles the session before committing the crash", async () => {
