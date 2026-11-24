@@ -14,8 +14,9 @@ name: Web CI
 # and the difference is load-bearing rather than stylistic. A workflow skipped by
 # a trigger filter creates no check run at all, and GitHub blocks a PR whose
 # required check never reports. `Web CI` below is a required check, so the
-# workflow must always run and always report. See .github/actions/changed-paths
-# for the full reasoning.
+# workflow must always run and always report: a job skipped by its `if:` reports
+# success, which satisfies a required check. The `changes` job's filter fails
+# OPEN; it says why.
 #
 # `push` is unfiltered for a different reason: main always gets a full-suite
 # signal after merge, whatever the merge commit happened to touch.
@@ -48,104 +49,84 @@ jobs:
     # PR-authored code by design — install scripts, the specs themselves — so
     # handing them PR API authority they never use is authority they can leak.
     # A job-level `permissions:` REPLACES the workflow default, so `contents:
-    # read` is restated here for the checkout.
+    # read` is restated here, as paths-filter's documentation asks.
     permissions:
       contents: read
       pull-requests: read
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
-      web: ${{ steps.filter.outputs.web }}
+      # 'true' when the filter didn't run: see its `if:`.
+      web: ${{ steps.filter.outputs.web || 'true' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Pull requests only, from the API, both sides of any rename: a push to main
+      # runs the full lane whatever it touched (see the header). Also skipped, so
+      # the lane runs, for a pull request past the 3000 files GitHub's API lists,
+      # where a list cut short could look mobile-only.
+      - id: filter
+        if: ${{ github.event_name == 'pull_request' && github.event.pull_request.changed_files < 3000 }}
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
-          persist-credentials: false
-          sparse-checkout: .github/actions/changed-paths
-      - id: paths
-        uses: ./.github/actions/changed-paths
+          # A file counts when it matches a path below and none of the `!` ones.
+          predicate-quantifier: some-with-excludes
+          filters: |
+            # Fail-OPEN, deliberately: the suite runs unless EVERY changed file is
+            # provably irrelevant to the browser. Anything unrecognised still runs
+            # it, so a new web-relevant directory added later cannot silently lose
+            # coverage. The mobile lanes are the mirror image, a positive list
+            # failing closed, because there a missed path costs a fleet of macOS
+            # runners rather than coverage. Do not "make them consistent".
+            #
+            # packages/core/** is deliberately NOT excluded. core is source-only
+            # and tsup inlines it via `noExternal`, so a core change literally
+            # alters the shipped browser bundle. It MUST run this suite. Only the
+            # parts of core tsup never sees are left out: its native engine, its
+            # Markdown (as all Markdown is), and the files only core's own suite
+            # reads (Core CI runs that suite on every PR).
+            #
+            # The exclusions name categories rather than single files wherever a
+            # category is provably irrelevant, so the list doesn't grow with every
+            # new workflow or doc.
+            web:
+              - '**'
 
-      # Deliberately fail-OPEN: the suite runs unless EVERY changed file is
-      # provably irrelevant to the browser. Anything unrecognised still runs it,
-      # so a new web-relevant directory added later cannot silently lose
-      # coverage.
-      #
-      # react-native.yml's filter is the mirror image — a positive list, failing
-      # CLOSED, because there a missed path costs a fleet of macOS runners rather
-      # than coverage. The two lanes want opposite failure directions; do not
-      # "make them consistent".
-      #
-      # packages/core/** is deliberately NOT in this list. core is source-only
-      # and tsup inlines it via `noExternal`, so a core change literally alters
-      # the shipped browser bundle. It MUST run this suite. That is the case the
-      # fail-open design exists for — do not "complete" the list with it. Only
-      # core's native engine (core/swift, core/kotlin) is left out, and its
-      # Markdown, as all Markdown is: tsup never sees them.
-      #
-      # The list names categories rather than single files wherever a category is
-      # provably irrelevant, so it doesn't grow with every new workflow or doc.
-      - name: Decide whether the web lane runs
-        id: filter
-        env:
-          FILES: ${{ steps.paths.outputs.files-path }}
-          IS_PR: ${{ steps.paths.outputs.is-pull-request }}
-        run: |
-          set -euo pipefail
-          if [ "$IS_PR" != 'true' ]; then
-            echo 'not a PR — running the full lane'
-            echo 'web=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # This workflow is the one file under .github/workflows/ the lane runs,
-          # so a change to it runs the lane before the rule below, which skips
-          # every workflow, sees it.
-          if grep -qxF '.github/workflows/web.yml' "$FILES"; then
-            echo 'web.yml changed — running the lane'
-            echo 'web=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # `grep -v` with several -e patterns selects lines matching NONE of
-          # them, so this asks "is any changed file outside the set below?":
-          #
-          # - Every other workflow. None of them builds what this suite tests:
-          #   the CI lanes test their own SDKs, and the publish and release
-          #   workflows run by hand and build their own package,
-          #   publish-browser.yml included.
-          # - The repository's GitHub configuration: CODEOWNERS, Dependabot,
-          #   actionlint. Not .github/actions/: this lane runs changed-paths, so
-          #   an action stays relevant unless it's named below, as the Kotlin
-          #   engine's test steps are.
-          # - Markdown, anywhere, and the LICENSE. The browser package ships its
-          #   README and CHANGELOG, but nothing this suite builds or runs reads
-          #   them.
-          # - The mobile-only paths.
-          if grep -qvE \
-              -e '^\.github/workflows/' \
-              -e '^\.github/(CODEOWNERS|dependabot\.yml|actionlint\.yaml)$' \
-              -e '\.md$' \
-              -e '^LICENSE$' \
-              -e '^changelog_unreleased/' \
-              -e '^packages/react-native/' \
-              -e '^packages/core/swift/' \
-              -e '^packages/core/kotlin/' \
-              -e '^scripts/vendor-engine\.mjs$' \
-              -e '^apps/rn-playground/' \
-              -e '^tests/e2e/mobile/' \
-              -e '^mobilewright\.config\.ts$' \
-              -e '^packages/flutter/' \
-              -e '^apps/flutter-playground/' \
-              -e '^\.github/actions/engine-tests-kotlin/' \
-              -e '^packages/ios/' \
-              -e '^apps/ios-playground/' \
-              -e '^\.swift-format$' \
-              -e '^packages/android/' \
-              -e '^apps/android-playground/' \
-              "$FILES"; then
-            echo 'web-relevant changes found — running the lane'
-            echo 'web=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'nothing the browser bundle depends on changed — skipping the web lane'
-            echo 'web=false' >> "$GITHUB_OUTPUT"
-          fi
+              # Every workflow but this one. None of them builds what this suite
+              # tests: the CI lanes test their own SDKs, and the publish and
+              # release workflows run by hand and build their own package,
+              # publish-browser.yml included.
+              - '!.github/workflows/!(web.yml)'
+              # The repository's GitHub configuration. Not all of .github/actions/:
+              # an action stays relevant unless it's named below, as the Kotlin
+              # engine's test steps are.
+              - '!.github/{CODEOWNERS,dependabot.yml,actionlint.yaml}'
+              # Markdown, anywhere, and the licences. The browser package ships
+              # its README, CHANGELOG and LICENSE, but nothing this suite builds or
+              # runs reads them.
+              - '!**/*.md'
+              - '!**/LICENSE'
+              - '!changelog_unreleased/**'
+              # core's tests and the tooling only its own suite reads. The browser
+              # build type-checks core's source through tsconfig.json, which
+              # excludes the tests.
+              - '!packages/core/ts/**/*.test.ts'
+              - '!packages/core/ts/lint-fixtures/**'
+              - '!packages/core/ts/{eslint.config.mjs,vitest.config.ts,tsconfig.tests.json}'
+              # The mobile-only paths.
+              - '!packages/react-native/**'
+              - '!packages/core/swift/**'
+              - '!packages/core/kotlin/**'
+              - '!scripts/vendor-engine.mjs'
+              - '!apps/rn-playground/**'
+              - '!tests/e2e/mobile/**'
+              - '!mobilewright.config.ts'
+              - '!packages/flutter/**'
+              - '!apps/flutter-playground/**'
+              - '!.github/actions/engine-tests-kotlin/**'
+              - '!packages/ios/**'
+              - '!apps/ios-playground/**'
+              - '!.swift-format'
+              - '!packages/android/**'
+              - '!apps/android-playground/**'
 
   unit:
     name: Browser unit tests

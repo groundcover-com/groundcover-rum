@@ -5,38 +5,19 @@ name: Native iOS CI
 # which the shared Mobilewright suite drives with APP=native. Shaped like flutter.yml, for the same
 # reasons:
 #
-# - `push` is scoped to main and path-filtered at the trigger; `pull_request` is NOT.
-#   `Native iOS CI` at the bottom is the lane's check to require, and a workflow skipped
-#   by a trigger-level path filter creates no check run at all, which would block every PR
-#   that doesn't touch iOS. So on PRs the workflow always starts, `changes` decides whether
-#   the work runs, and `gate` always reports. Full reasoning in .github/actions/changed-paths.
-# - The `changes` filter fails CLOSED (a positive list), like the RN and Flutter lanes'.
+# - `push` is scoped to main, and neither trigger is path-filtered. `Native iOS CI` at the
+#   bottom is the lane's check to require, and a workflow skipped by a trigger-level path filter
+#   creates no check run at all, which would block every PR that doesn't touch iOS. So the
+#   workflow always starts, `changes` decides whether the work runs, and `gate` always reports.
+# - `changes` filters on a positive list of paths, failing CLOSED, like the RN and Flutter
+#   lanes'.
 #
 # Android has a workflow of its own (native-android.yml), so an iOS-only change never waits
 # on emulators and an Android-only change spends no macOS minutes.
 on:
   push:
     branches: [main]
-    paths:
-      - 'packages/ios/**'
-      - 'apps/ios-playground/**'
-      # The Swift engine the package vendors, and the script that copies it.
-      - 'packages/core/swift/**'
-      - 'scripts/vendor-engine.mjs'
-      # The wire contract and the shared e2e suite, which the native lanes run too, with the
-      # suite's root config, the Mobilewright patch and the install it runs from.
-      - 'packages/core/wire/**'
-      - 'tests/e2e/mobile/**'
-      - 'mobilewright.config.ts'
-      - 'patches/**'
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      - '.swift-format'
-      - '.github/workflows/native-ios.yml'
-      - '.github/actions/changed-paths/**'
-      #
-      # THIS LIST AND THE `changes` JOB'S PATTERN LIST MUST AGREE: one policy in two syntaxes.
+  # No `paths:` on either trigger, on purpose — see the header.
   pull_request:
   workflow_dispatch:
 
@@ -63,49 +44,43 @@ jobs:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
-      ios: ${{ steps.filter.outputs.ios }}
+      # 'true' when the filter didn't run: see its `if:`.
+      ios: ${{ steps.filter.outputs.ios || 'true' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # How the files are listed, and when the filter is skipped: react-native.yml.
+      - if: ${{ github.event_name == 'push' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/actions/changed-paths
-      - id: paths
-        uses: ./.github/actions/changed-paths
-      - name: Decide whether the native iOS lane runs
-        id: filter
-        env:
-          FILES: ${{ steps.paths.outputs.files-path }}
-          IS_PR: ${{ steps.paths.outputs.is-pull-request }}
-        run: |
-          set -euo pipefail
-          if [ "$IS_PR" != 'true' ]; then
-            echo 'not a PR — the trigger already filtered this'
-            echo 'ios=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Keep in sync with the `push` trigger's paths: list above.
-          if grep -qE \
-              -e '^packages/ios/' \
-              -e '^apps/ios-playground/' \
-              -e '^packages/core/swift/' \
-              -e '^scripts/vendor-engine\.mjs$' \
-              -e '^packages/core/wire/' \
-              -e '^tests/e2e/mobile/' \
-              -e '^mobilewright\.config\.ts$' \
-              -e '^patches/' \
-              -e '^package\.json$' \
-              -e '^pnpm-lock\.yaml$' \
-              -e '^pnpm-workspace\.yaml$' \
-              -e '^\.swift-format$' \
-              -e '^\.github/workflows/native-ios\.yml$' \
-              -e '^\.github/actions/changed-paths/' \
-              "$FILES"; then
-            echo 'native-iOS-relevant changes found — running the lane'
-            echo 'ios=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'no native-iOS-relevant changes — skipping the lane'
-            echo 'ios=false' >> "$GITHUB_OUTPUT"
-          fi
+      - id: filter
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.changed_files < 3000) }}
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          # A file counts when it matches a path below and none of the `!` ones.
+          predicate-quantifier: some-with-excludes
+          filters: |
+            ios:
+              - 'packages/ios/**'
+              - 'apps/ios-playground/**'
+              # The Swift engine the package vendors, and the script that copies it.
+              - 'packages/core/swift/**'
+              - 'scripts/vendor-engine.mjs'
+              # The wire contract and the shared e2e suite, which the native lanes run too, with
+              # the suite's root config, the Mobilewright patch and the install it runs from.
+              - 'packages/core/wire/**'
+              - 'tests/e2e/mobile/**'
+              - 'mobilewright.config.ts'
+              - 'patches/**'
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.npmrc'
+              - '.swift-format'
+              - '.github/workflows/native-ios.yml'
+
+              # Markdown and the licences, which nothing this lane builds or runs reads.
+              - '!**/*.md'
+              - '!**/LICENSE'
 
   # Everything on one macOS runner, in the order that fails cheapest first: macOS runners are
   # costly, and every step needs Xcode's toolchain, so separate jobs would each pay a runner's
