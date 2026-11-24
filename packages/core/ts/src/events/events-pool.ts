@@ -94,8 +94,10 @@ export interface EventsPoolDeps<TType extends string = string> {
 
 // What the send gate is told about the send it is asked to allow.
 export interface FlushGateContext<TType extends string = string> {
-  // The host is being hidden or torn down (flush({ lifecycle: true })): the
-  // last send this buffer may get.
+  // The host forced this send (flush({ lifecycle: true })): it is being
+  // hidden, backgrounded or closed, so this may be the last send the buffer
+  // gets. Some platforms force one for other reasons too (React Native: after
+  // a fatal error or a recovered hang).
   lifecycle: boolean;
   // The events waiting to be sent, as buffered. Read them; never change them.
   events: ReadonlyArray<BaseEvent<TType>>;
@@ -348,6 +350,12 @@ export class EventsPool<TType extends string = string> {
         sessionAttributes: this.getSessionAttributes(),
         events: this.pending.toSend(),
       };
+      // Emptied BEFORE the send. The lifecycle send reaches the network
+      // synchronously, and an event added from inside it (a host fetch wrapper
+      // that logs) must land in a fresh buffer: in this one it would be cleared
+      // unsent, or a nested flush would send the whole batch twice. Nothing is
+      // lost by clearing first: send() contains its own failures.
+      this.clearBuffer();
       // Only pass the options arg on the lifecycle path — the periodic /
       // batch-threshold path uses the async encoder by default.
       if (lifecycle) {
@@ -355,7 +363,6 @@ export class EventsPool<TType extends string = string> {
       } else {
         this.transporter.send(batch);
       }
-      this.clearBuffer();
       this.scheduleFlush();
     } catch (error) {
       handleError(error);
@@ -379,11 +386,14 @@ export class EventsPool<TType extends string = string> {
         return;
       }
 
-      await this.transporter.send({
+      const batch = {
         sessionAttributes: this.getSessionAttributes(),
         events: this.pending.toSend(),
-      });
+      };
+      // Emptied before the send, as in flush(): an event added while it is in
+      // flight belongs to the next batch, not to this cleared one.
       this.clearBuffer();
+      await this.transporter.send(batch);
     } catch (error) {
       handleError(error);
     }

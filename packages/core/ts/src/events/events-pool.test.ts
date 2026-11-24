@@ -306,6 +306,57 @@ describe("EventsPool", () => {
         expect.objectContaining({ events: expect.arrayContaining([mockEvent]) })
       );
     });
+
+    const sentIds = () =>
+      mockSend.mock.calls.map(([batch]) => (batch as { events: BaseEvent[] }).events.map((e) => e.id));
+
+    // A send that re-enters the pool (a host fetch wrapper that logs): the
+    // event goes in the next batch, not cleared unsent or sent twice.
+    it("an event added from inside the send goes in the next batch", () => {
+      mockSend.mockImplementationOnce(() => {
+        eventsPool.addEvent(createMockEvent({ id: "during-send" }));
+      });
+      eventsPool.addEvent(createMockEvent({ id: "first" }));
+
+      eventsPool.flush({ lifecycle: true });
+      eventsPool.flush();
+
+      expect(sentIds()).toEqual([["first"], ["during-send"]]);
+    });
+
+    it("an event added from inside the send that fills a batch is not sent twice", () => {
+      const config = configManager.getConfig()!;
+      configManager.getConfig.mockReturnValue({
+        ...config,
+        options: { ...config.options, transport: { ...config.options.transport, batchSize: 1 } },
+      });
+      mockSend.mockImplementationOnce(() => {
+        // batchSize 1: this asks for a nested flush.
+        eventsPool.addEvent(createMockEvent({ id: "during-send" }));
+      });
+
+      eventsPool.addEvent(createMockEvent({ id: "first" }));
+
+      expect(sentIds()).toEqual([["first"], ["during-send"]]);
+    });
+
+    it("flushSync: an event added while the send is in flight goes in the next batch", async () => {
+      let finishSend!: () => void;
+      mockSend.mockImplementationOnce(
+        () => new Promise<void>((resolve) => { finishSend = resolve; })
+      );
+      eventsPool.addEvent(createMockEvent({ id: "first" }));
+      // Below batchSize 5: nothing sent yet.
+      expect(mockSend).not.toHaveBeenCalled();
+
+      const sending = eventsPool.flushSync();
+      eventsPool.addEvent(createMockEvent({ id: "in-flight" }));
+      finishSend();
+      await sending;
+      eventsPool.flush();
+
+      expect(sentIds()).toEqual([["first"], ["in-flight"]]);
+    });
   });
 
   describe("transport batch edge values (explicit 0)", () => {

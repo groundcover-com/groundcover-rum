@@ -996,6 +996,26 @@ describe("SessionLifecycle - releasing an unconfirmed session on suspend", () =>
     expect(mockDiscardBuffer).toHaveBeenCalledTimes(1);
     expect(mockFlush).not.toHaveBeenCalled();
   });
+
+  it("only the session current at install releases: one a rotation started does not", () => {
+    const gate = installedGate({ releasesOnSuspend: releasesExceptions });
+    // The cap passes in a tab nobody touches; background traffic rotates it.
+    tripCap();
+    getHook()({ type: "background" });
+    expect(mockSetSessionId).toHaveBeenCalledTimes(1);
+    expect(sessionData.lastActivityMs > 0).toBe(false);
+
+    expect(gate({ lifecycle: true, events: buffered("background", "exception") })).toBe(false);
+  });
+
+  it("a rotated session that interaction confirms sends as usual", () => {
+    const gate = installedGate({ releasesOnSuspend: releasesExceptions });
+    tripCap();
+    getHook()({ type: "activity" });
+
+    expect(gate({ lifecycle: true, events: buffered("activity") })).toBe(true);
+    expect(gate({ lifecycle: false, events: buffered("activity") })).toBe(true);
+  });
 });
 
 describe("SessionLifecycle - rotateIfStale", () => {

@@ -829,37 +829,34 @@ describe("SessionManager", () => {
   });
 
   // App-hide wiring lives in SessionManager, not EventsPool: it owns the
-  // document visibilitychange listener and, on hidden, persists the exact
-  // activity timestamp (steady-state writes are throttled) before the
+  // window visibilitychange and pagehide listeners and, on hide, persists the
+  // exact activity timestamp (steady-state writes are throttled) before the
   // lifecycle flush. The listener registry is stubbed locally so leftover
   // listeners from other tests' undestroyed managers can't contaminate the
   // call counts — invoking the captured handlers IS the dispatch.
-  describe("app-hide wiring (visibilitychange)", () => {
-    let visibilityListeners: Set<EventListener>;
+  describe("app-hide wiring (visibilitychange, pagehide)", () => {
+    const HIDE_EVENTS = ["visibilitychange", "pagehide"];
+    let listeners: Map<string, Set<EventListener>>;
     let addSpy: ReturnType<typeof vi.spyOn>;
     let removeSpy: ReturnType<typeof vi.spyOn>;
 
+    const setVisibility = (state: DocumentVisibilityState) =>
+      Object.defineProperty(document, "visibilityState", { value: state, configurable: true });
+
     beforeEach(() => {
       vi.clearAllMocks();
-      visibilityListeners = new Set();
+      listeners = new Map(HIDE_EVENTS.map((type) => [type, new Set<EventListener>()]));
       addSpy = vi
-        .spyOn(document, "addEventListener")
+        .spyOn(window, "addEventListener")
         .mockImplementation((type: string, handler: unknown) => {
-          if (type === "visibilitychange") {
-            visibilityListeners.add(handler as EventListener);
-          }
+          listeners.get(type)?.add(handler as EventListener);
         });
       removeSpy = vi
-        .spyOn(document, "removeEventListener")
+        .spyOn(window, "removeEventListener")
         .mockImplementation((type: string, handler: unknown) => {
-          if (type === "visibilitychange") {
-            visibilityListeners.delete(handler as EventListener);
-          }
+          listeners.get(type)?.delete(handler as EventListener);
         });
-      Object.defineProperty(document, "visibilityState", {
-        value: "hidden",
-        configurable: true,
-      });
+      setVisibility("hidden");
     });
 
     afterEach(() => {
@@ -867,16 +864,16 @@ describe("SessionManager", () => {
       removeSpy.mockRestore();
     });
 
-    const dispatchHide = () => {
-      for (const listener of [...visibilityListeners]) {
-        (listener as (event: Event) => void)(new Event("visibilitychange"));
+    const dispatch = (type: string) => {
+      for (const listener of [...listeners.get(type)!]) {
+        (listener as (event: Event) => void)(new Event(type));
       }
     };
 
     it("persists the last activity and lifecycle-flushes the pool when the document becomes hidden", () => {
       const manager = new SessionManager(validConfig);
 
-      dispatchHide();
+      dispatch("visibilitychange");
 
       expect(sessionStateInstance.persistLastActivity).toHaveBeenCalledTimes(1);
       expect(eventsPoolInstance.flush).toHaveBeenCalledWith({ lifecycle: true });
@@ -884,15 +881,80 @@ describe("SessionManager", () => {
       manager.destroy();
     });
 
-    it("destroy() removes the visibilitychange listener (no calls after destroy)", () => {
+    it("listens on window, so the send comes after every listener on the document", () => {
+      const documentAddSpy = vi.spyOn(document, "addEventListener");
+      try {
+        const manager = new SessionManager(validConfig);
+
+        expect(listeners.get("visibilitychange")!.size).toBe(1);
+        expect(documentAddSpy).not.toHaveBeenCalledWith("visibilitychange", expect.anything());
+
+        manager.destroy();
+      } finally {
+        documentAddSpy.mockRestore();
+      }
+    });
+
+    it("does nothing on a visibilitychange to visible", () => {
       const manager = new SessionManager(validConfig);
-      expect(visibilityListeners.size).toBe(1);
+      setVisibility("visible");
+
+      dispatch("visibilitychange");
+
+      expect(eventsPoolInstance.flush).not.toHaveBeenCalled();
 
       manager.destroy();
-      expect(visibilityListeners.size).toBe(0);
+    });
+
+    it("lifecycle-flushes on pagehide, whatever the visibility state", () => {
+      const manager = new SessionManager(validConfig);
+      // A browser that fires no visibilitychange on navigation still reads
+      // visible here.
+      setVisibility("visible");
+
+      dispatch("pagehide");
+
+      expect(sessionStateInstance.persistLastActivity).toHaveBeenCalledTimes(1);
+      expect(eventsPoolInstance.flush).toHaveBeenCalledWith({ lifecycle: true });
+
+      manager.destroy();
+    });
+
+    it("drains pending replay frames into the pool before the flush", () => {
+      const manager = new SessionManager(validConfig);
+
+      dispatch("visibilitychange");
+
+      expect(mockFlushPendingReplay).toHaveBeenCalledTimes(1);
+      expect(mockFlushPendingReplay.mock.invocationCallOrder[0]).toBeLessThan(
+        eventsPoolInstance.flush.mock.invocationCallOrder[0]!
+      );
+
+      manager.destroy();
+    });
+
+    it("still flushes when draining replay throws", () => {
+      const manager = new SessionManager(validConfig);
+      mockFlushPendingReplay.mockImplementationOnce(() => {
+        throw new Error("replay drain failed");
+      });
+
+      dispatch("visibilitychange");
+
+      expect(eventsPoolInstance.flush).toHaveBeenCalledWith({ lifecycle: true });
+
+      manager.destroy();
+    });
+
+    it("destroy() removes both listeners (no calls after destroy)", () => {
+      const manager = new SessionManager(validConfig);
+      for (const type of HIDE_EVENTS) expect(listeners.get(type)!.size).toBe(1);
+
+      manager.destroy();
+      for (const type of HIDE_EVENTS) expect(listeners.get(type)!.size).toBe(0);
 
       vi.clearAllMocks();
-      dispatchHide();
+      for (const type of HIDE_EVENTS) dispatch(type);
 
       expect(sessionStateInstance.persistLastActivity).not.toHaveBeenCalled();
       expect(eventsPoolInstance.flush).not.toHaveBeenCalled();

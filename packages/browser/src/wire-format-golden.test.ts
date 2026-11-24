@@ -54,10 +54,11 @@ function simulatePresence(): void {
   window.dispatchEvent(new Event("pointerdown"));
 }
 
-// The tab is hidden: the SDK's lifecycle flush. showPage undoes it.
+// The tab is hidden: the SDK's lifecycle flush. showPage undoes it. The event bubbles, as the
+// browser's does: the SDK listens on window.
 function hidePage(): void {
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
-  document.dispatchEvent(new Event("visibilitychange"));
+  document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
 }
 
 function showPage(): void {
@@ -355,6 +356,37 @@ describe("wire-format golden contract", () => {
       expect(fetchMock).not.toHaveBeenCalled();
     } finally {
       showPage();
+    }
+  });
+
+  it("does not send a session a rotation started when the app is hidden, before presence", async () => {
+    const SESSION_MAX_DURATION_MS = 60_000;
+    const base = Date.now();
+    let clock = base;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+
+    try {
+      const sdk = initSDK({
+        ...BASE_CONFIG,
+        options: { ...BASE_CONFIG.options, sessionMaxDuration: SESSION_MAX_DURATION_MS },
+      });
+      const firstSessionId = sdk.getSessionId();
+
+      // Nobody touches the app. Past the cap, background traffic rotates the session, and the
+      // new one catches an exception.
+      clock = base + SESSION_MAX_DURATION_MS + 1_000;
+      sdk.sendCustomEvent({ event: "background", attributes: {} });
+      sdk.captureException(new Error("poll failed"));
+      await drainAsyncSends();
+      expect(sdk.getSessionId()).not.toBe(firstSessionId);
+
+      hidePage();
+      await drainAsyncSends();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      showPage();
+      nowSpy.mockRestore();
     }
   });
 

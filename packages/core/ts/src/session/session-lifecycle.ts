@@ -49,13 +49,22 @@ export interface SessionLifecycleDeps<
   // events a platform emits regardless of user action (e.g. periodic
   // recording batches). Platform-owned; pass an empty set if none exist.
   ignoredEventTypes: ReadonlySet<TType>;
-  // Optional exception to the send gate, for the host's suspend flush only
-  // (flush({ lifecycle: true }): hidden, backgrounded, closing). When it returns
-  // true for any buffered event, a session no interaction confirmed sends its
-  // whole buffer on that flush instead of holding it, so what the session
-  // caught (e.g. an exception while loading) isn't lost when the user leaves
-  // without touching anything. Every other send stays gated, the session stays
-  // unconfirmed, and the event doesn't count as presence.
+  // Optional exception to the send gate, for the host's lifecycle flushes
+  // (flush({ lifecycle: true })). When it returns true for any buffered event,
+  // a session no interaction confirmed sends its whole buffer on that flush
+  // instead of holding it, so what the session caught (e.g. an exception while
+  // loading) isn't lost when the user leaves without touching anything. Every
+  // other send stays gated, the session stays unconfirmed, and the event
+  // doesn't count as presence.
+  //
+  // Only the session current when install() ran: a session a later rotation
+  // starts with no interaction (the cap passing in a tab nobody touches) is
+  // background traffic, which is what the gate is for.
+  //
+  // Each lifecycle flush the platform makes releases, not only suspend. On the
+  // browser the page-hide flush is the only one. React Native also forces one
+  // after a fatal error and after a recovered hang, so adopting this there as
+  // is would release on those too.
   //
   // Platform-owned (the browser: exceptions). Omitted: the gate has no
   // exception, as on a platform that hasn't adopted it.
@@ -82,6 +91,9 @@ export class SessionLifecycle<
   private readonly releasesOnSuspend: ((event: BaseEvent<TType>) => boolean) | null;
   private readonly hooks: SessionLifecycleHooks<TRotationContext>;
   private rotating = false;
+  // Whether releasesOnSuspend still applies: true for the session current at
+  // install, false from the first rotation on.
+  private releaseEligible = true;
 
   constructor(deps: SessionLifecycleDeps<TRotationContext, TType>) {
     this.session = deps.session;
@@ -100,13 +112,14 @@ export class SessionLifecycle<
   // Arm the pool-side observation points. The enqueue hook drives per-event
   // reconciliation; the flush gate holds transmission until the session has
   // observed genuine presence (the anti-ghost-session rule), except for a
-  // suspend flush whose buffer holds an event releasesOnSuspend names. Install
-  // BEFORE the host's listeners arm, so the gate is in place before the first
-  // event is captured.
+  // lifecycle flush of the install-time session whose buffer holds an event
+  // releasesOnSuspend names. Install BEFORE the host's listeners arm, so the
+  // gate is in place before the first event is captured.
   install(): void {
     this.pool.setBeforeEnqueueHook((event) => this.reconcileOnEnqueue(event));
     this.pool.setFlushGate(({ lifecycle, events }) =>
-      this.session.hasUserActivity() || (lifecycle && this.holdsReleasingEvent(events))
+      this.session.hasUserActivity()
+      || (lifecycle && this.releaseEligible && this.holdsReleasingEvent(events))
     );
   }
 
@@ -268,6 +281,8 @@ export class SessionLifecycle<
         // paired with the previous session's start time.
         const startNs = this.resolveNewSessionStartTime(options.triggeringEvent);
         this.session.setSessionId(newId);
+        // The new session isn't the one the SDK started with: no release.
+        this.releaseEligible = false;
         // Also resets the activity clock (see SessionState.setSessionStartTime),
         // so a pre-gap lastActivity can't instantly gap-rotate the new session.
         this.session.setSessionStartTime(startNs);

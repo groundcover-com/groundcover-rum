@@ -24,8 +24,10 @@ import { EventType } from "./utils";
  * - No clicks, no pointer, no keys: any of them is an interaction and would
  *   open the gate the normal way. Errors are thrown from an injected script,
  *   which is an uncaught error like any other.
- * - page.clock freezes timers, so the batch heartbeat only fires when the spec
- *   fast-forwards past it.
+ * - page.clock.install() doesn't freeze time: timers run in real time, and
+ *   fastForward fires the batch heartbeat at once instead of after 10 s. The
+ *   gate holds the heartbeat's send either way, so no result here depends on
+ *   when it fires.
  */
 const BASE = process.env.PLAYGROUND_URL || "http://localhost:4173";
 const BATCH_TIMEOUT_MS = 10_000; // SDK default transport.batchTimeout
@@ -110,16 +112,16 @@ async function expectNothingSentWhileOnPage(page: Page, collector: Collector): P
   expect(collector.batches, "nothing is sent while the visitor is still on the page").toHaveLength(0);
 }
 
-async function expectLoadErrorArrives(collector: Collector): Promise<void> {
+async function expectLoadErrorArrives(collector: Collector, message = LOAD_ERROR): Promise<void> {
   await expect
     .poll(() => eventsOf(collector.batches, EventType.EXCEPTION).length, {
-      message: "the load error should reach the collector after the visitor left",
+      message: "the error should reach the collector after the page was hidden or left",
       timeout: 10_000,
     })
     .toBeGreaterThan(0);
 
   const exception = eventsOf(collector.batches, EventType.EXCEPTION)[0]!;
-  expect(exception.attributes).toMatchObject({ error_message: LOAD_ERROR, error_handled: false });
+  expect(exception.attributes).toMatchObject({ error_message: message, error_handled: false });
   // Sent with what the session held, as context for the error.
   expect(eventsOf(collector.batches, EventType.PAGELOAD).length).toBeGreaterThan(0);
   const sessionIds = new Set(collector.batches.map((batch) => batch.sessionAttributes?.session_id));
@@ -170,6 +172,44 @@ test.describe("RUM SDK | Errors before the first interaction", () => {
     await page.close({ runBeforeUnload: true });
 
     await expectLoadErrorArrives(collector);
+  });
+
+  test("a load error reaches the collector on pagehide alone, with no visibilitychange", async ({ page }) => {
+    await openPlayground(page, collector);
+    // A page already hidden when it unloads (a tab opened in the background and closed unseen)
+    // gets pagehide and no visibilitychange. Playwright can't open a page hidden, so this stops
+    // visibilitychange before any listener sees it.
+    await page.evaluate(() => {
+      window.addEventListener("visibilitychange", (event) => event.stopImmediatePropagation(), true);
+    });
+    await throwUncaught(page, LOAD_ERROR);
+    await expectNothingSentWhileOnPage(page, collector);
+
+    await page.goto("about:blank");
+
+    await expectLoadErrorArrives(collector);
+  });
+
+  test("an error the app throws in its own hide listener goes with that send", async ({ page }) => {
+    const HIDE_ERROR = "Failed to save draft on hide";
+    await openPlayground(page, collector);
+    // Added after the SDK started, as an app's (or web-vitals') hide listener is.
+    await runPageScript(
+      page,
+      `document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "hidden") throw new Error(${JSON.stringify(HIDE_ERROR)});
+      });`
+    );
+    await expectNothingSentWhileOnPage(page, collector);
+
+    // A tab switch, simulated: Playwright can't hide a page, and leaving it would also fire
+    // pagehide, which sends the error on its own. The event bubbles, as the browser's does.
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+      document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
+    });
+
+    await expectLoadErrorArrives(collector, HIDE_ERROR);
   });
 
   test("a visit without interaction and without an error is still not sent", async ({ page }) => {

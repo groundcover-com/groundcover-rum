@@ -25,10 +25,11 @@ function sentEvents(fetchMock: ReturnType<typeof vi.fn>): BaseEvent[] {
   return sentBatches(fetchMock).flatMap((batch) => batch.events);
 }
 
-// The tab is hidden: the SDK's lifecycle flush. showPage undoes it.
+// The tab is hidden: the SDK's lifecycle flush. showPage undoes it. The event bubbles, as the
+// browser's does: the SDK listens on window.
 function hidePage(): void {
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
-  document.dispatchEvent(new Event("visibilitychange"));
+  document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
 }
 
 function showPage(): void {
@@ -98,6 +99,50 @@ describe("errors before the first interaction", () => {
     await drainAsyncSends();
 
     expect(sentEvents(fetchMock).some((e) => e.type === "exception")).toBe(true);
+  });
+
+  it("an exception the app captures in its own hide listener goes with that send", async () => {
+    manager = new SessionManager(BASE_CONFIG);
+    const sdk = manager;
+    // Added after the SDK started, as an app's or web-vitals' listener is.
+    const appListener = () => {
+      if (document.visibilityState === "hidden") sdk.captureException(new Error("save on hide failed"));
+    };
+    document.addEventListener("visibilitychange", appListener);
+    try {
+      hidePage();
+      await drainAsyncSends();
+    } finally {
+      document.removeEventListener("visibilitychange", appListener);
+    }
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sentEvents(fetchMock).find((e) => e.type === "exception")?.attributes).toMatchObject({
+      error_message: "save on hide failed",
+    });
+  });
+
+  it("pagehide sends it when no visibilitychange comes (a tab closed while already hidden)", async () => {
+    manager = new SessionManager(BASE_CONFIG);
+    manager.captureException(new Error("load failed"));
+    // The document still reads visible, as in a browser that fires no visibilitychange on
+    // navigation: pagehide sends regardless.
+    window.dispatchEvent(new Event("pagehide"));
+    await drainAsyncSends();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(sentEvents(fetchMock).some((e) => e.type === "exception")).toBe(true);
+    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ keepalive: true });
+  });
+
+  it("visibilitychange then pagehide sends it once", async () => {
+    manager = new SessionManager(BASE_CONFIG);
+    manager.captureException(new Error("load failed"));
+    hidePage();
+    window.dispatchEvent(new Event("pagehide"));
+    await drainAsyncSends();
+
+    expect(sentEvents(fetchMock).filter((e) => e.type === "exception")).toHaveLength(1);
   });
 
   it("merges repeats of the error as usual", async () => {

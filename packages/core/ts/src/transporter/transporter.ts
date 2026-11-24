@@ -56,9 +56,10 @@ export interface BatchRequest {
 // warns once (fetch resolves rather than rejects on 4xx and 5xx).
 //
 // `options` is passed only for a lifecycle send (EventsPool.flush({ lifecycle:
-// true }), when the host is hidden or torn down), so the platform can ask its
-// network layer to let the request outlive the page or process (the browser's
-// fetch `keepalive`). A sender with no such thing ignores it.
+// true }): the host is hidden or torn down, or forced the send for another
+// reason, such as React Native after a fatal error), so the platform can ask
+// its network layer to let the request outlive the page or process (the
+// browser's fetch `keepalive`). A sender with no such thing ignores it.
 export interface BatchSendOptions {
   lifecycle: true;
 }
@@ -110,7 +111,9 @@ export class Transporter {
 
   // `lifecycle: true` skips the async encoder round-trip and compresses inline
   // so the request is queued before the host can suspend or tear down the
-  // process. Set by EventsPool.flush from the platform's suspend handler.
+  // process. Set by EventsPool.flush({ lifecycle: true }), which the platform
+  // calls when it suspends (and React Native also after a fatal error or a
+  // recovered hang).
   async send<TType extends string = string>(
     batch: Batch<TType>,
     { lifecycle = false }: { lifecycle?: boolean } = {}

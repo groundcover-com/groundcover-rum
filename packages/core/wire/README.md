@@ -56,7 +56,9 @@ reference versions, under these names:
 - **Exception before presence:** Browser only, until the other SDKs adopt it. When the app is
   hidden before presence, a session that caught an exception is sent, everything it held included,
   and one that didn't is not ("sends a session that caught an exception when the app is hidden,
-  before presence" / "does not send a session without an exception …").
+  before presence" / "does not send a session without an exception …"). Only the session the SDK
+  started with: one a rotation started is not sent either ("does not send a session a rotation
+  started …").
 - **Sampling:** with `sessionSampleRate: 0` nothing is sent, even after presence.
 - **Session identity:** every flush in one session carries the same `session_id`, and it is the
   id the SDK reports.
