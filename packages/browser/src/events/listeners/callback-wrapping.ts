@@ -1,5 +1,6 @@
 import { handleError } from "@groundcover/rum-core/common/error-handler";
 import { PatchSet, type PatchSpec } from "@groundcover/rum-core/common/patch";
+import { parseErrorStack, type StackFrame } from "@groundcover/rum-core/events/errors/shape-error";
 import { _globalThis } from "../../common/global";
 
 // While the exceptions listener is live, the callbacks the app passes to
@@ -41,6 +42,9 @@ export function enableCallbackWrapping(by: object): void {
         if (typeof hostFunctions()[name] === "function") {
           timerPatches.install([timerPatch(name)]);
         }
+      }
+      if (typeof hostFunctions().reportError === "function") {
+        timerPatches.install([reportErrorPatch()]);
       }
     }
   } catch (error) {
@@ -97,15 +101,122 @@ export function takeLastRethrown(): { value: unknown } | undefined {
 
 /**
  * For an event that carries its error: drop that value from the noted ones, so
- * a hidden event later in the task isn't matched to it.
+ * a hidden event later in the task isn't matched to it. Whether it was one:
+ * the error reached the event through a wrapper.
  */
-export function forgetRethrown(value: unknown): void {
+export function forgetRethrown(value: unknown): boolean {
   for (let i = rethrown.length - 1; i >= 0; i--) {
     if (Object.is(rethrown[i], value)) {
       rethrown.splice(i, 1);
-      return;
+      return true;
     }
   }
+  return false;
+}
+
+// ── Third-party scripts ─────────────────────────────────────────────────────
+//
+// Every browser hides the errors of a classic script from another origin
+// loaded without `crossorigin` (a third-party widget, ad or tag manager). A
+// wrapper around such a script's callback catches its errors anyway, and in
+// Chrome the rethrow from the SDK's own script even shows them in full. Those
+// errors stay unreported, as before the wrappers existed: an error is dropped
+// when no frame of its stack, the wrappers' own left out, is in a script the
+// page can see errors from.
+
+/**
+ * Whether every frame of the error's stack, the wrappers' own left out, is in
+ * a script whose errors the browser hides from the page. An error with a
+ * frame anywhere else (the app's code, a script loaded with `crossorigin`, a
+ * module), or with no stack, is reported. Never throws.
+ */
+export function fromHiddenScriptsOnly(error: Error): boolean {
+  try {
+    const wrappers = wrapperSites();
+    const frames = parseErrorStack(error).filter(
+      (frame) => isAddress(frame.filename) && !wrappers.has(siteOf(frame))
+    );
+    return frames.length > 0 && frames.every((frame) => isHiddenScript(frame.filename));
+  } catch (failure) {
+    handleError(failure);
+    return false;
+  }
+}
+
+// Frames without a web address (native code, eval, a file the test runner
+// loaded) say nothing about where an error came from, so they are left out.
+function isAddress(filename: string): boolean {
+  return /^https?:\/\//i.test(filename);
+}
+
+// Whether the browser hides errors from the script at this address: a
+// classic script from another origin that no <script> element loaded with
+// `crossorigin`. An address no <script> element has (a module's import, a
+// script removed after it ran) counts as visible, so an error from the app's
+// own code is never dropped for want of an element.
+function isHiddenScript(filename: string): boolean {
+  const page = _globalThis.location;
+  const scripts = _globalThis.document?.scripts;
+  if (!page || !scripts) return false;
+  let address: URL;
+  try {
+    address = new URL(filename);
+  } catch {
+    return false;
+  }
+  if (address.origin === page.origin) return false;
+  const target = withoutHash(address.href);
+  let found = false;
+  for (const script of Array.from(scripts)) {
+    if (!script.src || withoutHash(script.src) !== target) continue;
+    if (script.type === "module" || script.hasAttribute("crossorigin")) return false;
+    found = true;
+  }
+  return found;
+}
+
+function withoutHash(href: string): string {
+  const hash = href.indexOf("#");
+  return hash < 0 ? href : href.slice(0, hash);
+}
+
+function siteOf(frame: StackFrame): string {
+  return `${frame.filename}:${frame.lineno}:${frame.colno}`;
+}
+
+// The frames the wrappers add to a stack, right below the app's callback, as
+// file:line:column. Found once, on the first error that needs them, by
+// running each wrapper over a function that throws: the frame after the
+// thrower's is the wrapper's. Minification can't hide them this way.
+let wrapperSiteSet: Set<string> | undefined;
+let calibrating = false;
+
+function wrapperSites(): Set<string> {
+  if (wrapperSiteSet) return wrapperSiteSet;
+  const sites = new Set<string>();
+  const thrower = function () {
+    throw new Error("calibration");
+  };
+  const runs: Array<() => unknown> = [
+    () => wrapFunction(thrower).call(undefined),
+    () => wrapListener(thrower).call(undefined, undefined as unknown as Event),
+    () => wrapListener({ handleEvent: thrower }).call(undefined, undefined as unknown as Event),
+  ];
+  calibrating = true;
+  try {
+    for (const run of runs) {
+      try {
+        run();
+      } catch (error) {
+        const frame = parseErrorStack(error as Error).filter((f) => isAddress(f.filename))[1];
+        if (frame) sites.add(siteOf(frame));
+      }
+    }
+  } finally {
+    calibrating = false;
+  }
+  wrapperSiteSet = sites;
+  return sites;
 }
 
 // ── Wrappers ────────────────────────────────────────────────────────────────
@@ -117,7 +228,7 @@ function wrapFunction(fn: HostFunction): HostFunction {
     try {
       return fn.apply(this, args);
     } catch (thrown) {
-      if (owner) noteRethrown(thrown);
+      if (owner && !calibrating) noteRethrown(thrown);
       throw thrown;
     }
   };
@@ -133,7 +244,7 @@ function wrapListener(listener: Listener): EventListener {
         ? listener.call(this, event)
         : listener.handleEvent(event);
     } catch (thrown) {
-      if (owner) noteRethrown(thrown);
+      if (owner && !calibrating) noteRethrown(thrown);
       throw thrown;
     }
   };
@@ -144,10 +255,31 @@ function wrapListener(listener: Listener): EventListener {
 const TIMER_SLOTS = ["setTimeout", "setInterval", "requestAnimationFrame"] as const;
 type TimerSlot = (typeof TIMER_SLOTS)[number];
 
+// The timers and reportError, restored when the SDK shuts down.
 const timerPatches = new PatchSet();
 
-function hostFunctions(): Record<TimerSlot, HostFunction | undefined> {
-  return _globalThis as unknown as Record<TimerSlot, HostFunction | undefined>;
+function hostFunctions(): Record<TimerSlot | "reportError", HostFunction | undefined> {
+  return _globalThis as unknown as Record<TimerSlot | "reportError", HostFunction | undefined>;
+}
+
+// reportError(value) reports a value as uncaught without throwing it, and
+// WebKit hides it like a thrown error when the caller's script is from another
+// origin. React 19 sends here the errors it catches in event handlers and
+// rendering. The error event is dispatched inside the call, so the value is
+// noted first. React keeps the reportError it finds when react-dom loads, so
+// this reaches React only when the SDK starts before react-dom is imported.
+function reportErrorPatch(): PatchSpec<HostFunction> {
+  return {
+    get: () => hostFunctions().reportError as HostFunction,
+    set: (fn) => {
+      hostFunctions().reportError = fn;
+    },
+    wrap: (original) =>
+      function (this: unknown, ...args: unknown[]) {
+        if (owner) noteRethrown(args[0]);
+        return original.apply(this, args);
+      },
+  };
 }
 
 // The callback is the first argument of all three. A string handler (eval'd
@@ -215,9 +347,11 @@ function installEventTargetPatch(): void {
         // The app may have added this listener before it was wrapped (before
         // the SDK started, or while it was shut down). That registration
         // would run alongside the wrapper, so the listener would run twice for
-        // one event: replace it, so the listener stays registered once. When
-        // it isn't registered this removes nothing.
-        remove.call(this, type, listener, options);
+        // one event: replace it, so the listener stays registered once, under
+        // this call's options and last in order. When it isn't registered
+        // this removes nothing. An add with an already-aborted signal adds
+        // nothing, so it must not remove the registration either.
+        if (!hasAbortedSignal(options)) remove.call(this, type, listener, options);
         return original.call(this, type, wrapped, options);
       },
   };
@@ -236,4 +370,8 @@ function installEventTargetPatch(): void {
   };
   // Both or neither: an add without its remove would strand listeners.
   eventTargetPatched = new PatchSet().install([add, removeSpec]);
+}
+
+function hasAbortedSignal(options: boolean | AddEventListenerOptions | undefined): boolean {
+  return typeof options === "object" && options !== null && options.signal?.aborted === true;
 }

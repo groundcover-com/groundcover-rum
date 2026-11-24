@@ -16,6 +16,7 @@ import {
   disableCallbackWrapping,
   enableCallbackWrapping,
   forgetRethrown,
+  fromHiddenScriptsOnly,
   takeLastRethrown,
 } from "./callback-wrapping";
 
@@ -111,16 +112,31 @@ function errorFromErrorEvent(event: ErrorEvent): Error | null {
 }
 
 // What the window "error" listener reports. An error the browser hid is
-// reported as the value a callback wrapper caught and rethrew just before the
-// event (see callback-wrapping.ts); with no such value, a hidden error is
-// still dropped.
+// reported as the value a callback wrapper caught and rethrew, or that
+// reportError was given, just before the event (see callback-wrapping.ts);
+// with no such value, a hidden error is still dropped. A value that came
+// through a wrapper is dropped when it comes only from scripts whose errors
+// the browser hides from the page (third-party scripts loaded without CORS):
+// the browser hid those before the wrappers existed, in every browser.
 function errorFromWindowError(event: ErrorEvent): Error | null {
   if (event.error == null && isHiddenError(event)) {
     const recovered = takeLastRethrown();
-    return recovered ? errorFromThrown(recovered.value, event) : null;
+    return recovered ? errorFromWrapped(recovered.value) : null;
   }
-  forgetRethrown(event.error);
+  if (forgetRethrown(event.error)) {
+    return errorFromWrapped(event.error, event.message);
+  }
   return errorFromErrorEvent(event);
+}
+
+// A value a wrapper caught. The event's location is where the wrapper
+// rethrew it, inside the SDK, so a value without a stack of its own gets no
+// frame instead of that one. `message` is the browser's text for a thrown
+// null or undefined, which has nothing else to show.
+function errorFromWrapped(thrown: unknown, message?: string): Error | null {
+  const error = thrown == null && message ? new Error(message) : coerceToError(thrown);
+  if (error !== thrown && !hasStack(thrown)) error.stack = "";
+  return fromHiddenScriptsOnly(error) ? null : error;
 }
 
 function isHiddenError(event: ErrorEvent): boolean {

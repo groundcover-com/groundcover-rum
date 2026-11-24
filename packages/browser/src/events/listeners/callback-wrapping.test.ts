@@ -31,21 +31,46 @@ describe("callback wrapping (errors the browser hides)", () => {
   let hostSetTimeout: typeof setTimeout;
   let realSetTimeout: typeof setTimeout;
   let savedSlots: Array<[object, string, PropertyDescriptor | undefined]>;
+  // The page's <script> elements, as the SDK sees them through document.scripts.
+  let scripts: Array<{ src: string; type: string; hasAttribute(name: string): boolean }>;
+  // How the reportError stand-in dispatches its event: hidden, as WebKit does
+  // for a cross-origin caller, or in full, as Chrome does.
+  let reportShows: "hidden" | "full";
+  let hostReportError: typeof reportError;
 
   beforeEach(async () => {
     vi.resetModules();
     sessionStorage.clear();
     delete window.groundcover;
 
-    // Restored in afterEach: the global EventTarget and rAF stand-ins, and
-    // the EventTarget patch, which the SDK never restores itself.
+    // Restored in afterEach: the global EventTarget, rAF, reportError and
+    // document.scripts stand-ins, and the EventTarget patch, which the SDK
+    // never restores itself.
     savedSlots = [
       [globalThis, "EventTarget"],
       [globalThis, "requestAnimationFrame"],
+      [globalThis, "reportError"],
+      [document, "scripts"],
       [domEventTarget.prototype, "addEventListener"],
       [domEventTarget.prototype, "removeEventListener"],
     ].map(([target, key]) => [target as object, key as string, Object.getOwnPropertyDescriptor(target, key as string)]);
     Object.defineProperty(globalThis, "EventTarget", { value: domEventTarget, writable: true, configurable: true });
+
+    scripts = [];
+    Object.defineProperty(document, "scripts", { get: () => scripts, configurable: true });
+    reportShows = "hidden";
+    Object.defineProperty(globalThis, "reportError", {
+      value: (value: unknown) => {
+        window.dispatchEvent(
+          reportShows === "hidden"
+            ? new ErrorEvent("error", { error: null, message: "Script error." })
+            : new ErrorEvent("error", { error: value, message: `Uncaught ${String(value)}` })
+        );
+      },
+      writable: true,
+      configurable: true,
+    });
+    hostReportError = globalThis.reportError;
 
     held = [];
     realSetTimeout = globalThis.setTimeout;
@@ -339,9 +364,162 @@ describe("callback wrapping (errors the browser hides)", () => {
 
       expect(exceptions()).toHaveLength(0);
     });
+
+    // happy-dom adds a listener even with an already-aborted signal, which a
+    // browser doesn't, so this checks the call the SDK makes: an add that
+    // adds nothing must not remove the listener's earlier registration.
+    it("leaves a listener's earlier registration alone when it is added again with an aborted signal", () => {
+      const nativeRemove = vi.spyOn(domEventTarget.prototype, "removeEventListener");
+      init();
+      const button = document.createElement("button");
+      const listener = vi.fn();
+      const controller = new AbortController();
+      controller.abort();
+
+      button.addEventListener("click", listener, { signal: controller.signal });
+      expect(nativeRemove).not.toHaveBeenCalledWith("click", listener, expect.anything());
+
+      button.addEventListener("click", listener);
+      expect(nativeRemove).toHaveBeenCalledWith("click", listener, undefined);
+    });
+  });
+
+  describe("third-party scripts", () => {
+    const WIDGET = "https://widget.example/w.js";
+    const appScript = () => new URL("/app.js", location.href).href;
+    const script = (src: string, crossorigin = false) => ({
+      src,
+      type: "",
+      hasAttribute: (name: string) => crossorigin && name === "crossorigin",
+    });
+    // An Error whose stack runs through these files, top frame first.
+    const errorIn = (message: string, ...files: string[]) => {
+      const error = new Error(message);
+      error.stack = [
+        `Error: ${message}`,
+        ...files.map((file, i) => `    at fn${i} (${file}:${i + 1}:${i + 10})`),
+      ].join("\n");
+      return error;
+    };
+    const throwFromCallback = (error: Error) => {
+      setTimeout(() => {
+        throw error;
+      }, HELD);
+      runHeld();
+    };
+
+    it("drops an error thrown only in a script the page loads without crossorigin", () => {
+      init();
+      scripts = [script(WIDGET)];
+
+      throwFromCallback(errorIn("widget broke", WIDGET, WIDGET));
+      hiddenError();
+
+      expect(exceptions()).toHaveLength(0);
+    });
+
+    it("drops it on a browser that shows it in full, too", () => {
+      init();
+      scripts = [script(WIDGET)];
+      const error = errorIn("widget broke", WIDGET);
+
+      throwFromCallback(error);
+      window.dispatchEvent(new ErrorEvent("error", { error, message: "Uncaught Error: widget broke" }));
+
+      expect(exceptions()).toHaveLength(0);
+    });
+
+    it("reports it when the app's own code is in the stack", () => {
+      init();
+      scripts = [script(WIDGET), script(appScript())];
+
+      throwFromCallback(errorIn("widget broke under the app", WIDGET, appScript()));
+      hiddenError();
+
+      expect(exceptions()).toHaveLength(1);
+    });
+
+    it("reports an error from a third-party script loaded with crossorigin", () => {
+      init();
+      scripts = [script(WIDGET, true)];
+
+      throwFromCallback(errorIn("cors widget broke", WIDGET));
+      hiddenError();
+
+      expect(exceptions()).toHaveLength(1);
+    });
+
+    it("reports an error from an address no script element has", () => {
+      init();
+
+      throwFromCallback(errorIn("chunk broke", "https://cdn.example/chunk-1.js"));
+      hiddenError();
+
+      expect(exceptions()).toHaveLength(1);
+    });
+
+    it("reports a third-party error the browser shows without a wrapper, as before", () => {
+      init();
+      scripts = [script(WIDGET)];
+      const error = errorIn("shown by the browser", WIDGET);
+
+      window.dispatchEvent(new ErrorEvent("error", { error, message: "Uncaught Error: shown by the browser" }));
+
+      expect(exceptions()).toHaveLength(1);
+    });
+  });
+
+  describe("reportError", () => {
+    it("reports the value for the hidden 'Script error.' it dispatches", () => {
+      init();
+      reportError(new Error("reported by a framework"));
+
+      expect(exceptions()).toHaveLength(1);
+      expect(exceptions()[0]!.attributes?.error_message).toBe("reported by a framework");
+    });
+
+    it("reports a value the browser shows in full once", () => {
+      init();
+      reportShows = "full";
+      reportError(new Error("shown in full"));
+      hiddenError();
+
+      expect(exceptions()).toHaveLength(1);
+    });
+  });
+
+  it("gives a non-Error value that came through a wrapper no frame inside the SDK", () => {
+    init();
+    setTimeout(() => {
+      throw "plain string";
+    }, HELD);
+
+    runHeld();
+    // Where a browser that shows the error puts it: the wrapper's rethrow.
+    window.dispatchEvent(
+      new ErrorEvent("error", {
+        error: "plain string",
+        message: "Uncaught plain string",
+        filename: new URL("/sdk.js", location.href).href,
+        lineno: 5,
+        colno: 7,
+      })
+    );
+
+    const [event] = exceptions();
+    expect(event!.attributes?.error_message).toBe("plain string");
+    expect(event!.attributes?.error_stacktrace ?? []).toHaveLength(0);
   });
 
   describe("lifecycle", () => {
+    it("restores reportError when the SDK shuts down", () => {
+      init();
+      expect(globalThis.reportError).not.toBe(hostReportError);
+
+      sdk.logger.manager?.destroy();
+      expect(globalThis.reportError).toBe(hostReportError);
+    });
+
     it("wraps the host's timers while the SDK runs and restores them when it shuts down", () => {
       init();
       expect(globalThis.setTimeout).not.toBe(hostSetTimeout);

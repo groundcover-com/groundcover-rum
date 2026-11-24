@@ -649,30 +649,49 @@ reported stack starts inside the SDK.
 
 ### Errors hidden as "Script error."
 
-From `2.3.1`. Safari, and every browser on iOS, hides an error thrown inside a `setTimeout`,
-`setInterval`, `requestAnimationFrame` or event-listener callback when the script that registered
-the callback is served from another origin, such as a CDN, even when it is loaded with
-`crossorigin="anonymous"` and served with CORS headers. The page's `error` event then carries only
-`"Script error."`, with no error, file or stack. Errors thrown while such a script first runs and
-unhandled promise rejections arrive in full, and so does everything in Chrome and Firefox.
+From `2.3.1`. Browsers hide the details of an error that comes from a script served from another
+origin: the page's `error` event carries only `"Script error."`, with no error, file or stack, so the
+SDK has nothing to report. Chrome and Firefox show the error in full when the script is loaded with
+`crossorigin="anonymous"` and served with CORS headers. Safari, and every browser on iOS, still hides
+an error thrown inside a `setTimeout`, `setInterval`, `requestAnimationFrame` or event-listener
+callback from such a script, and an error passed to `reportError()`. Errors thrown while the script
+first runs, and unhandled promise rejections, arrive in full.
 
-So the SDK runs each callback your code passes to those four functions inside its own try/catch.
-When one throws, the SDK notes the error and throws it again unchanged, then reports it, with its
-real type, message and stack, when the browser's `"Script error."` event arrives. A browser that
-shows the error in full reports it as it always did, and an error is never sent twice. This is part
-of the `exceptions` listener.
+So the SDK runs each callback your code passes to those four functions inside its own try/catch, and
+notes each value passed to `reportError`. When a callback throws, the SDK notes the error and throws
+it again unchanged, then reports it, with its real type, message and stack, when the browser's
+`"Script error."` event arrives. A browser that shows the error in full reports it as it always did,
+and an error is never sent twice. This is part of the `exceptions` listener.
 
-- **Only those four functions are wrapped.** Callbacks registered another way (an `onclick`
-  property, a `MutationObserver`, or a copy of `setTimeout` your code saved before `init`) are
-  still hidden. Errors your framework catches itself were never uncaught, and still aren't reported
-  as uncaught.
+- **Third-party scripts stay unreported.** Every browser hides the errors of a script from another
+  origin loaded without `crossorigin`, such as a widget, an ad or a tag manager. The SDK's try/catch
+  sees them anyway, so it drops an error when every frame of its stack is in such a script. An error
+  with your own code anywhere in its stack is reported.
+- **Start the SDK before your app renders.** Only callbacks registered after `init` are wrapped.
+  Listeners added before it (such as the ones your framework adds when it first renders) and a copy
+  of `setTimeout` saved before it stay unwrapped, so their errors stay hidden on Safari. Callbacks
+  registered another way, such as an `onclick` property or a `MutationObserver`, aren't wrapped.
+- **React 19** reports the errors it catches in event handlers and rendering through `reportError`,
+  which it looks up when `react-dom` loads. For Safari to report them, call `init` in a module that
+  is imported before `react-dom`:
+
+  ```ts
+  // main.tsx
+  import "./groundcover"; // calls groundcover.init(...)
+  import { createRoot } from "react-dom/client";
+  ```
+
 - **Listeners behave as before.** Adding the same listener twice registers it once, and
-  `removeEventListener` removes it, including a listener added before `init` and again after it.
+  `removeEventListener` removes it. A listener added before `init` and again after it stays
+  registered once, with the second call's options, and runs after the target's other listeners.
   After the SDK shuts down, `addEventListener` and `removeEventListener` keep its layer, so a
   listener added while it ran can still be removed; new listeners are then added unwrapped.
-- **Other error handlers see what they saw before** when the SDK is bundled with your code. If the
-  SDK is served from a different origin than your page, Safari also hides errors from your page's
-  own callbacks from other handlers, such as `window.onerror`; the SDK still reports them.
+- **What other error handlers on the page see.** They get the error as the SDK rethrows it: the same
+  error object and stack, but the event's file, line and column are the SDK's rather than where your
+  code threw. Because the rethrow comes from the SDK's script, they also see the callback errors of
+  third-party scripts in full instead of `"Script error."`. On Safari, if the SDK is served from a
+  different origin than your page, they see `"Script error."` for errors from your own callbacks
+  too; the SDK still reports those.
 
 ---
 
