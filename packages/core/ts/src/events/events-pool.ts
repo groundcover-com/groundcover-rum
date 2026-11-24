@@ -10,7 +10,8 @@ import { Logger } from "../common/logger";
 import { PendingBatch } from "./pending-batch";
 
 // Cap on events held while the flush gate is closed (no presence yet); nothing
-// is sent meanwhile. Bounds a never-confirmed bot or background session — real
+// is sent meanwhile, unless the gate lets a lifecycle flush through
+// (SessionLifecycle's releasesOnSuspend). Bounds a never-confirmed bot or background session — real
 // sessions confirm in seconds. On overflow drop the NEWEST, keeping the earliest.
 export const MAX_GATED_BUFFER_EVENTS = 500;
 // Fallbacks for an omitted/invalid transport setting — sourced from the shared
@@ -91,6 +92,17 @@ export interface EventsPoolDeps<TType extends string = string> {
   eventsToSkipFlush: ReadonlyArray<NoInfer<TType>>;
 }
 
+// What the send gate is told about the send it is asked to allow.
+export interface FlushGateContext<TType extends string = string> {
+  // The host is being hidden or torn down (flush({ lifecycle: true })): the
+  // last send this buffer may get.
+  lifecycle: boolean;
+  // The events waiting to be sent, as buffered. Read them; never change them.
+  events: ReadonlyArray<BaseEvent<TType>>;
+}
+
+export type FlushGate<TType extends string = string> = (context: FlushGateContext<TType>) => boolean;
+
 export class EventsPool<TType extends string = string> {
   // Replaced whole whenever it is sent or dropped (clearBuffer).
   private pending: PendingBatch<BaseEvent<TType>>;
@@ -108,7 +120,7 @@ export class EventsPool<TType extends string = string> {
   // Policy-free send gate (mirrors onBeforeEnqueue). While it returns false,
   // flush/flushSync/batch/lifecycle sends hold instead of shipping; null = no
   // gate, so every send goes out. SessionLifecycle owns the presence policy.
-  private flushGate: (() => boolean) | null = null;
+  private flushGate: FlushGate<TType> | null = null;
 
   constructor(deps: EventsPoolDeps<TType>) {
     this.config = deps.config;
@@ -156,8 +168,8 @@ export class EventsPool<TType extends string = string> {
   }
 
   // Install/clear the send gate. Policy-free — EventsPool only asks "am I
-  // allowed to send right now?"; InstrumentationManager owns what that means.
-  setFlushGate(gate: (() => boolean) | null): void {
+  // allowed to send right now?"; SessionLifecycle owns what that means.
+  setFlushGate(gate: FlushGate<TType> | null): void {
     this.flushGate = gate;
   }
 
@@ -191,10 +203,10 @@ export class EventsPool<TType extends string = string> {
   // Gate is open when unset, or when the predicate says so. A throwing predicate
   // fails OPEN (send): silently dropping a legit session forever is worse than a
   // rare ghost, and it keeps the "gate unset ⇒ every send goes out" guarantee.
-  private isFlushAllowed(): boolean {
+  private isFlushAllowed(lifecycle = false): boolean {
     if (this.flushGate === null) return true;
     try {
-      return this.flushGate();
+      return this.flushGate({ lifecycle, events: this.pending.events });
     } catch (error) {
       handleError(error);
       return true;
@@ -303,7 +315,10 @@ export class EventsPool<TType extends string = string> {
       // Gated (no presence yet): hold the buffer but keep the heartbeat armed
       // (like the empty / no-cluster branches) so the next flush after
       // confirmation drains it. Covers batch-size, lifecycle and heartbeat too.
-      if (!this.isFlushAllowed()) {
+      // The gate is told which kind of send this is: it may let a lifecycle
+      // send through that it would hold otherwise (SessionLifecycle's
+      // releasesOnSuspend).
+      if (!this.isFlushAllowed(lifecycle)) {
         this.scheduleFlush();
         return;
       }

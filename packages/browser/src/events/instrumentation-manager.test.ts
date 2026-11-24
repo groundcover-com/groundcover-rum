@@ -3,7 +3,8 @@ import { InstrumentationManager } from "./instrumentation-manager";
 import { msToNs } from "@groundcover/rum-core/common/global";
 import { ConfigManager } from "@groundcover/rum-core/config/config-manager";
 import { SessionState } from "@groundcover/rum-core/session/session-state";
-import { EventsPool } from "@groundcover/rum-core/events/events-pool";
+import { EventsPool, type FlushGate } from "@groundcover/rum-core/events/events-pool";
+import type { BaseEvent } from "@groundcover/rum-core/events/types";
 import { EventEnricher } from "@groundcover/rum-core/events/event-enricher";
 
 // This file covers the BROWSER-side policy: replay start/stop/pause/revival,
@@ -673,12 +674,24 @@ describe("InstrumentationManager - ghost-session send gate", () => {
 
   it("installs a flush gate bound to hasUserActivity on instrument()", () => {
     expect(mockSetFlushGate).toHaveBeenCalledTimes(1);
-    const gate = mockSetFlushGate.mock.calls[0]![0] as () => boolean;
+    const gate = mockSetFlushGate.mock.calls[0]![0] as FlushGate;
     expect(typeof gate).toBe("function");
     mockLastActivityState.value = 0;
-    expect(gate()).toBe(false);
+    expect(gate({ lifecycle: false, events: [] })).toBe(false);
     mockLastActivityState.value = Date.now();
-    expect(gate()).toBe(true);
+    expect(gate({ lifecycle: false, events: [] })).toBe(true);
+  });
+
+  // An unconfirmed session holding an exception is sent by the page-hide flush
+  // only (end to end in errors-before-interaction.test.ts).
+  it("opens the page-hide flush, and only it, for an unconfirmed session holding an exception", () => {
+    const gate = mockSetFlushGate.mock.calls[0]![0] as FlushGate;
+    mockLastActivityState.value = 0;
+    const exception = { type: "exception" } as BaseEvent;
+    const pageload = { type: "pageload" } as BaseEvent;
+    expect(gate({ lifecycle: true, events: [pageload, exception] })).toBe(true);
+    expect(gate({ lifecycle: false, events: [pageload, exception] })).toBe(false);
+    expect(gate({ lifecycle: true, events: [pageload] })).toBe(false);
   });
 
   it("clears the flush gate on uninstrument()", () => {

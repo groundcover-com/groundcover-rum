@@ -37,6 +37,8 @@ export {
   isUsableEvent,
   type EventsPoolDeps,
   type DeviceAttributesProvider,
+  type FlushGate,
+  type FlushGateContext,
 } from "./events/events-pool";
 export { ManualEventEmitter, type ManualEventEmitterDeps } from "./events/manual-event-emitter";
 export { BaseListener, type ListenerDeps } from "./events/listeners/base-listener";
@@ -80,6 +82,7 @@ export {
   type AsyncEncoder,
   type EncodedPayload,
   type BatchSender,
+  type BatchSendOptions,
   type BatchRequest,
 } from "./transporter/transporter";
 

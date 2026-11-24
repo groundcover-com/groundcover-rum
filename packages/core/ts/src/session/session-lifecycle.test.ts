@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { msToNs } from "../common/global";
-import { EventsPool } from "../events/events-pool";
+import { EventsPool, type FlushGate } from "../events/events-pool";
 import { IdGenerator } from "../common/id-generator";
 import { BaseEvent } from "../events/types";
 import { SessionLifecycle, SessionLifecycleDeps } from "./session-lifecycle";
@@ -226,12 +226,13 @@ describe("SessionLifecycle - pool wiring (install/teardown)", () => {
   it("installs a flush gate bound to hasUserActivity on install()", () => {
     createLifecycle().install();
     expect(mockSetFlushGate).toHaveBeenCalledTimes(1);
-    const gate = mockSetFlushGate.mock.calls[0]![0] as () => boolean;
+    const gate = mockSetFlushGate.mock.calls[0]![0] as FlushGate;
     expect(typeof gate).toBe("function");
     sessionData.lastActivityMs = 0;
-    expect(gate()).toBe(false);
+    expect(gate({ lifecycle: false, events: [] })).toBe(false);
+    expect(gate({ lifecycle: true, events: [] })).toBe(false);
     sessionData.lastActivityMs = Date.now();
-    expect(gate()).toBe(true);
+    expect(gate({ lifecycle: false, events: [] })).toBe(true);
   });
 
   it("uninstall() with no host teardown clears both observation points", () => {
@@ -923,6 +924,77 @@ describe("SessionLifecycle - ghost-session send gate", () => {
     expect(mockDiscardBuffer).toHaveBeenCalledTimes(1);
     expect(mockFlush).not.toHaveBeenCalled();
     expect(sessionData.lastActivityMs > 0).toBe(true);
+  });
+});
+
+// releasesOnSuspend: the one exception to the ghost-session gate. A session no
+// interaction confirmed is sent on the host's suspend flush when its buffer
+// holds an event the platform names (the browser: an exception), so what it
+// caught isn't lost when the user leaves untouched.
+describe("SessionLifecycle - releasing an unconfirmed session on suspend", () => {
+  const releasesExceptions = (event: BaseEvent) => event.type === "exception";
+  const installedGate = (overrides: Partial<SessionLifecycleDeps<boolean>> = {}): FlushGate => {
+    createLifecycle(overrides).install();
+    return mockSetFlushGate.mock.calls[0]![0] as FlushGate;
+  };
+  const buffered = (...types: string[]) => types.map((type) => ({ type }) as BaseEvent);
+
+  it("opens the suspend flush of an unconfirmed session holding a releasing event", () => {
+    const gate = installedGate({ releasesOnSuspend: releasesExceptions });
+    expect(gate({ lifecycle: true, events: buffered("pageload", "exception", "network") })).toBe(true);
+  });
+
+  it("holds every other send of that session (heartbeat, batch size, id flip)", () => {
+    const gate = installedGate({ releasesOnSuspend: releasesExceptions });
+    expect(gate({ lifecycle: false, events: buffered("pageload", "exception") })).toBe(false);
+  });
+
+  it("holds the suspend flush when nothing buffered releases it", () => {
+    const gate = installedGate({ releasesOnSuspend: releasesExceptions });
+    expect(gate({ lifecycle: true, events: buffered("pageload", "network", "log") })).toBe(false);
+    expect(gate({ lifecycle: true, events: [] })).toBe(false);
+  });
+
+  it("without releasesOnSuspend the suspend flush stays held (a platform that hasn't adopted it)", () => {
+    const gate = installedGate();
+    expect(gate({ lifecycle: true, events: buffered("exception") })).toBe(false);
+  });
+
+  it("a throwing releasesOnSuspend releases nothing (the pool would fail a throwing gate open)", () => {
+    const gate = installedGate({
+      releasesOnSuspend: () => {
+        throw new Error("bad predicate");
+      },
+    });
+    expect(() => gate({ lifecycle: true, events: buffered("exception") })).not.toThrow();
+    expect(gate({ lifecycle: true, events: buffered("exception") })).toBe(false);
+  });
+
+  it("a releasing event neither confirms the session nor counts as presence", () => {
+    createLifecycle({ releasesOnSuspend: releasesExceptions }).install();
+
+    getHook()({ type: "exception" });
+
+    expect(sessionData.lastActivityMs > 0).toBe(false);
+    expect(hookOnPresenceStamped).not.toHaveBeenCalled();
+  });
+
+  it("a confirmed session's sends are unaffected", () => {
+    const gate = installedGate({ releasesOnSuspend: releasesExceptions });
+    sessionData.lastActivityMs = Date.now();
+    expect(gate({ lifecycle: false, events: buffered("pageload") })).toBe(true);
+    expect(gate({ lifecycle: true, events: buffered("pageload") })).toBe(true);
+  });
+
+  it("an unconfirmed rotation still discards, releasing event or not", () => {
+    createLifecycle({ releasesOnSuspend: releasesExceptions }).install();
+    tripCap();
+
+    getHook()({ type: "exception" });
+
+    expect(mockSetSessionId).toHaveBeenCalledTimes(1);
+    expect(mockDiscardBuffer).toHaveBeenCalledTimes(1);
+    expect(mockFlush).not.toHaveBeenCalled();
   });
 });
 

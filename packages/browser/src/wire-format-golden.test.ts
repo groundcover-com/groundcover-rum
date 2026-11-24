@@ -319,6 +319,45 @@ describe("wire-format golden contract", () => {
     expect(names).toContain("post-presence");
   });
 
+  it("sends a session that caught an exception when the app is hidden, before presence", async () => {
+    const sdk = initSDK();
+
+    sdk.sendCustomEvent({ event: "pre-presence", attributes: {} });
+    sdk.captureException(new Error("load failed"));
+    await drainAsyncSends();
+    // Still gated while the app is in use.
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    try {
+      hidePage();
+      await drainAsyncSends();
+
+      // One request: the exception and everything held before it.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const events = allSentEvents(fetchMock);
+      expect(events.some((e) => e.type === "exception")).toBe(true);
+      expect(
+        events.some((e) => e.type === "custom" && e.attributes?.custom_event_name === "pre-presence")
+      ).toBe(true);
+    } finally {
+      showPage();
+    }
+  });
+
+  it("does not send a session without an exception when the app is hidden, before presence", async () => {
+    const sdk = initSDK();
+
+    sdk.sendCustomEvent({ event: "pre-presence", attributes: {} });
+    try {
+      hidePage();
+      await drainAsyncSends();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      showPage();
+    }
+  });
+
   it("sends nothing when sessionSampleRate is 0", async () => {
     const sdk = initSDK({
       ...BASE_CONFIG,

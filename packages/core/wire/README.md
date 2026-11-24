@@ -53,6 +53,10 @@ reference versions, under these names:
 
 - **Presence gate:** nothing is sent before genuine user presence, and events held before it ship
   once it comes ("does not transmit anything before genuine … presence").
+- **Exception before presence:** Browser only, until the other SDKs adopt it. When the app is
+  hidden before presence, a session that caught an exception is sent, everything it held included,
+  and one that didn't is not ("sends a session that caught an exception when the app is hidden,
+  before presence" / "does not send a session without an exception …").
 - **Sampling:** with `sessionSampleRate: 0` nothing is sent, even after presence.
 - **Session identity:** every flush in one session carries the same `session_id`, and it is the
   id the SDK reports.

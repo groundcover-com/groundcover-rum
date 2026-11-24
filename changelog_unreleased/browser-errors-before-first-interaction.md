@@ -1,0 +1,5 @@
+### Changed
+- **Browser — an exception before the first interaction is no longer lost.** The SDK sends nothing for a visit until the user first interacts with the page, and drops what it held if they never do, which also dropped an exception thrown while the page loaded when the visitor left before touching anything. Now, when the page is hidden or closed, a visit with no interaction yet is sent if it caught an exception, with everything the SDK held for it (page load, network requests, logs) as context. Visits without an exception are still dropped, and nothing is sent earlier. Visits without a real user that throw (bots, crawlers) now appear as sessions.
+
+### Fixed
+- **Browser — the batch sent when a visitor leaves the page now arrives.** The SDK sends what it holds when the page is hidden, but when the visitor navigated away or closed the tab, the browser often cancelled that request before the batch went out, losing the events captured since the last send (up to `transport.batchTimeout`, 10 seconds by default). It is now sent as a `keepalive` request, which outlives the page. A batch over the browsers' 64 KiB keepalive limit is sent as before.

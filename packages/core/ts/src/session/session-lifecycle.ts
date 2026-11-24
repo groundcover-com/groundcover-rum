@@ -49,6 +49,17 @@ export interface SessionLifecycleDeps<
   // events a platform emits regardless of user action (e.g. periodic
   // recording batches). Platform-owned; pass an empty set if none exist.
   ignoredEventTypes: ReadonlySet<TType>;
+  // Optional exception to the send gate, for the host's suspend flush only
+  // (flush({ lifecycle: true }): hidden, backgrounded, closing). When it returns
+  // true for any buffered event, a session no interaction confirmed sends its
+  // whole buffer on that flush instead of holding it, so what the session
+  // caught (e.g. an exception while loading) isn't lost when the user leaves
+  // without touching anything. Every other send stays gated, the session stays
+  // unconfirmed, and the event doesn't count as presence.
+  //
+  // Platform-owned (the browser: exceptions). Omitted: the gate has no
+  // exception, as on a platform that hasn't adopted it.
+  releasesOnSuspend?: (event: BaseEvent<TType>) => boolean;
   hooks?: SessionLifecycleHooks<TRotationContext>;
 }
 
@@ -68,6 +79,7 @@ export class SessionLifecycle<
   private readonly idGenerator: IdGenerator;
   private readonly activityEventTypes: ReadonlySet<TType>;
   private readonly ignoredEventTypes: ReadonlySet<TType>;
+  private readonly releasesOnSuspend: ((event: BaseEvent<TType>) => boolean) | null;
   private readonly hooks: SessionLifecycleHooks<TRotationContext>;
   private rotating = false;
 
@@ -77,6 +89,7 @@ export class SessionLifecycle<
     this.idGenerator = deps.idGenerator;
     this.activityEventTypes = deps.activityEventTypes;
     this.ignoredEventTypes = deps.ignoredEventTypes;
+    this.releasesOnSuspend = deps.releasesOnSuspend ?? null;
     this.hooks = deps.hooks ?? {};
   }
 
@@ -86,12 +99,29 @@ export class SessionLifecycle<
 
   // Arm the pool-side observation points. The enqueue hook drives per-event
   // reconciliation; the flush gate holds transmission until the session has
-  // observed genuine presence (the anti-ghost-session rule). Install BEFORE
-  // the host's listeners arm, so the gate is in place before the first
+  // observed genuine presence (the anti-ghost-session rule), except for a
+  // suspend flush whose buffer holds an event releasesOnSuspend names. Install
+  // BEFORE the host's listeners arm, so the gate is in place before the first
   // event is captured.
   install(): void {
     this.pool.setBeforeEnqueueHook((event) => this.reconcileOnEnqueue(event));
-    this.pool.setFlushGate(() => this.session.hasUserActivity());
+    this.pool.setFlushGate(({ lifecycle, events }) =>
+      this.session.hasUserActivity() || (lifecycle && this.holdsReleasingEvent(events))
+    );
+  }
+
+  // Contained HERE rather than left to the pool: the pool fails a throwing gate
+  // OPEN, which for this optional exception would send every unconfirmed
+  // session. A releasesOnSuspend that throws releases nothing, as if omitted.
+  private holdsReleasingEvent(events: ReadonlyArray<BaseEvent<TType>>): boolean {
+    const releases = this.releasesOnSuspend;
+    if (!releases) return false;
+    try {
+      return events.some((event) => releases(event));
+    } catch (error) {
+      handleError(error);
+      return false;
+    }
   }
 
   // Teardown ordering is a contract this method OWNS (not a comment callers

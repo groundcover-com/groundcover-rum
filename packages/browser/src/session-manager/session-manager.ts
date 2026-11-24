@@ -25,6 +25,7 @@ import {
   makeWebViewProvider,
   getWebDeviceAttributes,
 } from "@/platform/web-platform";
+import { createWebBatchSender } from "@/platform/batch-sender";
 
 // Event types that never trigger an immediate size-based flush on the
 // browser — interactions/navigations ride along with the next flushing event.
@@ -61,7 +62,9 @@ export class SessionManager {
   // calls). Persist the EXACT activity timestamp (steady-state writes are
   // throttled, so a reload could otherwise read a value up to a minute stale
   // and gap-rotate that much early), then flush synchronously so the fetch is
-  // queued before the browser can freeze the tab being hidden / closed.
+  // queued before the browser can freeze the tab being hidden / closed. That
+  // fetch is a keepalive request (createWebBatchSender), so it also survives
+  // the page being left.
   private hideHandler = (): void => {
     // Contained: runs as a document event handler in arbitrary embeds — a
     // throwing visibilityState read must not leak into the host app.
@@ -120,10 +123,8 @@ export class SessionManager {
 
     const transporter = new Transporter({
       config: configManager,
-      // The browser's network primitive. Resolved at call time rather than
-      // captured, so a host that installs its own fetch after init still sees
-      // it (and so our own network listener can instrument around it).
-      sendBatch: (endpoint, request) => fetch(endpoint, request),
+      // fetch, with keepalive for the send when the page is hidden or left.
+      sendBatch: createWebBatchSender(),
       // Browser-only optimization: offload gzip to the Web Worker, falling
       // back to the universal inline path on any worker failure.
       encodeAsync: (data, enableCompression) =>

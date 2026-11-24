@@ -215,6 +215,9 @@ options: {
 }
 ```
 
+An exception thrown before the visitor first interacts with the page is still sent; see
+[Visits without interaction](#visits-without-interaction).
+
 ### `options.replay`
 
 Session-replay recording controls. **This is noise reduction, not privacy** — to mask sensitive
@@ -546,6 +549,23 @@ move a session's start (the same value also drives the cap and inactivity clocks
 
 This assumes a fully configured SDK, which means `cluster` supplied at `init` — it is required, and
 every other guarantee here is stated for that case.
+
+### Visits without interaction
+
+The SDK sends nothing for a visit until the user first interacts with the page (pointer, key, scroll
+or touch input), and drops what it held if they never do, so bots and tabs opened and left in the
+background don't become sessions. The one exception is a visit that caught an exception:
+
+- **When the page is hidden or closed** (the visitor navigates away, closes the tab or switches to
+  another), a visit with no interaction yet is sent if it caught an exception, with everything the
+  SDK held for it (page load, network requests, logs) as context for the error. So an error thrown
+  while the page loads isn't lost when the visitor leaves before touching anything.
+- **Nothing is sent earlier**, and a visit without an exception is still dropped. The exception
+  doesn't count as an interaction: if the visitor comes back, the rest of the visit is held until
+  they interact, under the same session.
+- **Exceptions only**: uncaught errors, unhandled rejections and `captureException` calls.
+  Error-level logs don't count.
+- **Visits without a real user that throw** (bots, crawlers) appear as sessions.
 
 ### Micro-frontend session synchronization
 

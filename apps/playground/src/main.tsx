@@ -68,10 +68,26 @@ function buildOptions() {
   }
 }
 
+// E2E hook: `?gcdsn=<url>` points the SDK at a collector stub the spec runs, so
+// it can assert what actually arrives (e.g. after the page is left). Loopback
+// only; anything else keeps the default.
+function buildDsn(): string {
+  const fallback = "http://localhost:3000";
+  const raw = new URLSearchParams(window.location.search).get("gcdsn");
+  if (!raw) return fallback;
+  try {
+    const url = new URL(raw);
+    const loopback = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+    return loopback && url.protocol === "http:" ? url.origin : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 groundcover.init({
   cluster: "playground",
   environment: "development",
-  dsn: "http://localhost:3000",
+  dsn: buildDsn(),
   appId: "playground",
   apiKey: "playground-key",
   releaseId: "v1.0.0-playground",

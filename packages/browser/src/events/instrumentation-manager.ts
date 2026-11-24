@@ -32,6 +32,14 @@ export const BROWSER_ACTIVITY_EVENT_TYPES: ReadonlySet<BaseEvent["type"]> =
 // action — they must never drive session reconciliation on their own.
 export const BROWSER_IGNORED_EVENT_TYPES: ReadonlySet<BaseEvent["type"]> =
   new Set(["replay"]);
+// The one exception to the ghost-session gate: a session nobody interacted
+// with is still sent when the page is hidden or left if it caught an exception
+// (uncaught, unhandled rejection or captureException), with everything it held
+// as context. An error while loading is lost otherwise when the visitor leaves
+// before touching anything. Not presence: it opens only that send, and the
+// session stays unconfirmed.
+export const isBrowserReleasingEvent = (event: BaseEvent): boolean =>
+  event.type === "exception";
 
 export interface InstrumentationManagerDeps {
   config: ConfigManager;
@@ -91,6 +99,7 @@ export class InstrumentationManager {
       idGenerator: this.idGenerator,
       activityEventTypes: BROWSER_ACTIVITY_EVENT_TYPES,
       ignoredEventTypes: BROWSER_IGNORED_EVENT_TYPES,
+      releasesOnSuspend: isBrowserReleasingEvent,
       hooks: {
         // An actively-emitting recording IS a presence signal (rrweb only
         // emits on user input / DOM changes) — captured before beforeRotate
