@@ -2,7 +2,7 @@ import { handleError } from "@groundcover/rum-core/common/error-handler";
 import { PatchSet, type PatchSpec } from "@groundcover/rum-core/common/patch";
 import { _globalThis } from "../../common/global";
 
-// Opt-in (`options.errors.wrapCallbacks`): the callbacks the app passes to
+// While the exceptions listener is live, the callbacks the app passes to
 // setTimeout, setInterval, requestAnimationFrame and addEventListener run
 // inside a try/catch of ours.
 //
@@ -19,15 +19,15 @@ import { _globalThis } from "../../common/global";
 // that follows is still what the errors listener reports: a browser that gives
 // the full error puts the same value on the event, and for a hidden
 // "Script error." the listener takes the value the wrapper noted (see
-// takeLastRethrown). So turning this on changes nothing on browsers that report
-// these errors in full, and no error is reported twice.
+// takeLastRethrown). So nothing changes on browsers that report these errors
+// in full, and no error is reported twice.
 
 type HostFunction = (this: unknown, ...args: unknown[]) => unknown;
 type Listener = EventListenerOrEventListenerObject;
 
 // Whoever turned wrapping on (the live errors listener), or null when it is off.
-// A wrapper still reachable after wrapping is turned off (the host holds it as
-// a pending timer or a registered listener) only passes calls through.
+// A wrapper still reachable after the SDK shut down (the host holds it as a
+// pending timer or a registered listener) only passes calls through.
 let owner: object | null = null;
 
 /** Turn wrapping on, for `by`. Never throws. */
@@ -175,11 +175,11 @@ function timerPatch(name: TimerSlot): PatchSpec<HostFunction> {
 // the same wrapper, which the host ignores as it would have ignored the
 // listener, and removeEventListener with the listener removes its wrapper.
 //
-// That bookkeeping must outlive the option: a listener added while wrapping
-// was on is registered as its wrapper, so removing it later, after wrapping
-// is turned off or the SDK shut down, still has to go through us. So the
-// patch is installed once and never restored; with wrapping off it adds new
-// listeners as they are and keeps mapping the ones it already wrapped.
+// That bookkeeping must outlive the SDK: a listener added while the SDK ran is
+// registered as its wrapper, so removing it after the SDK shut down still has
+// to go through us. So the patch is installed once and never restored; with
+// the SDK shut down it adds new listeners as they are and keeps mapping the
+// ones it already wrapped.
 
 const listenerWrappers = new WeakMap<object, EventListener>();
 let eventTargetPatched = false;
@@ -213,7 +213,7 @@ function installEventTargetPatch(): void {
           listenerWrappers.set(listener, wrapped);
         }
         // The app may have added this listener before it was wrapped (before
-        // the SDK started, or while the option was off). That registration
+        // the SDK started, or while it was shut down). That registration
         // would run alongside the wrapper, so the listener would run twice for
         // one event: replace it, so the listener stays registered once. When
         // it isn't registered this removes nothing.

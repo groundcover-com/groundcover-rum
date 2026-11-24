@@ -24,7 +24,7 @@ const domEventTarget = (() => {
   return proto!.constructor as typeof EventTarget;
 })();
 
-describe("options.errors.wrapCallbacks", () => {
+describe("callback wrapping (errors the browser hides)", () => {
   let sdk: BrowserSdk;
   let addEventSpy: MockInstance<(event: BaseEvent) => void>;
   let held: HostFunction[];
@@ -90,19 +90,10 @@ describe("options.errors.wrapCallbacks", () => {
     delete window.groundcover;
   });
 
-  const init = (wrapCallbacks?: boolean, enabledEvents: string[] = ["exceptions"]) => {
-    sdk.init({
-      appId: "test-app",
-      options: {
-        enabledEvents: enabledEvents as never,
-        ...(wrapCallbacks === undefined ? {} : { errors: { wrapCallbacks } }),
-      },
-    });
+  const init = (enabledEvents: string[] = ["exceptions"]) => {
+    sdk.init({ appId: "test-app", options: { enabledEvents: enabledEvents as never } });
     addEventSpy.mockClear();
   };
-
-  const setWrapCallbacks = (wrapCallbacks: boolean) =>
-    sdk.updateConfig({ options: { errors: { wrapCallbacks } } });
 
   const exceptions = () =>
     addEventSpy.mock.calls.map(([event]) => event).filter((event) => event.type === "exception");
@@ -129,31 +120,26 @@ describe("options.errors.wrapCallbacks", () => {
     ["requestAnimationFrame", (callback) => requestAnimationFrame(callback)],
   ];
 
-  describe("off (the default)", () => {
+  describe("when the SDK isn't capturing exceptions", () => {
     it("hands the host the app's own callbacks and leaves addEventListener alone", () => {
       const before = EventTarget.prototype.addEventListener;
-      init();
       const callback = () => undefined;
+      setTimeout(callback, HELD);
+      init(["dom"]);
 
       setTimeout(callback, HELD);
       setInterval(callback, HELD);
       requestAnimationFrame(callback);
 
-      expect(held).toEqual([callback, callback, callback]);
+      expect(held).toEqual([callback, callback, callback, callback]);
+      expect(globalThis.setTimeout).toBe(hostSetTimeout);
       expect(EventTarget.prototype.addEventListener).toBe(before);
-    });
-
-    it("still drops a hidden error", () => {
-      init(false);
-      hiddenError();
-
-      expect(exceptions()).toHaveLength(0);
     });
   });
 
   describe.each(SCHEDULERS)("%s", (_name, schedule) => {
     it("reports the error its callback threw for the hidden 'Script error.' that follows", () => {
-      init(true);
+      init();
       const error = new Error("boom in a callback");
       schedule(() => {
         throw error;
@@ -174,7 +160,7 @@ describe("options.errors.wrapCallbacks", () => {
     });
 
     it("passes this, the arguments and the return value through", () => {
-      init(true);
+      init();
       const callback = vi.fn(function (this: unknown) {
         return "returned";
       });
@@ -190,7 +176,7 @@ describe("options.errors.wrapCallbacks", () => {
   });
 
   it("reports an error the browser shows in full once, from its event", () => {
-    init(true);
+    init();
     const error = new Error("shown in full");
     setTimeout(() => {
       throw error;
@@ -206,14 +192,14 @@ describe("options.errors.wrapCallbacks", () => {
   });
 
   it("drops a hidden error no wrapper caught", () => {
-    init(true);
+    init();
     hiddenError();
 
     expect(exceptions()).toHaveLength(0);
   });
 
   it("forgets a caught value when the task ends", async () => {
-    init(true);
+    init();
     setTimeout(() => {
       throw new Error("never reported");
     }, HELD);
@@ -226,7 +212,7 @@ describe("options.errors.wrapCallbacks", () => {
   });
 
   it("reports a thrown non-Error value without the SDK's own frames", () => {
-    init(true);
+    init();
     setTimeout(() => {
       throw "plain string";
     }, HELD);
@@ -240,7 +226,7 @@ describe("options.errors.wrapCallbacks", () => {
   });
 
   it("passes a string handler to setTimeout as is", () => {
-    init(true);
+    init();
     setTimeout("void 0" as unknown as HostFunction, HELD);
 
     expect(held).toEqual(["void 0"]);
@@ -248,7 +234,7 @@ describe("options.errors.wrapCallbacks", () => {
 
   describe("event listeners", () => {
     it("reports the error a listener threw for the hidden 'Script error.' that follows", () => {
-      init(true);
+      init();
       const button = document.createElement("button");
       const error = new Error("boom in a listener");
       button.addEventListener("click", () => {
@@ -269,7 +255,7 @@ describe("options.errors.wrapCallbacks", () => {
     });
 
     it("calls a listener with the target as this, once however often it was added, until removed", () => {
-      init(true);
+      init();
       const button = document.createElement("button");
       const listener = vi.fn(function (this: unknown) {});
 
@@ -285,7 +271,7 @@ describe("options.errors.wrapCallbacks", () => {
     });
 
     it("calls an object's handleEvent on the object, looked up on each event", () => {
-      init(true);
+      init();
       const button = document.createElement("button");
       const calls: string[] = [];
       const listener = {
@@ -306,13 +292,12 @@ describe("options.errors.wrapCallbacks", () => {
       expect(calls).toEqual(["first:click:true", "second:click:true"]);
     });
 
-    it("keeps a listener added before wrapping started registered once when it is added again", () => {
-      init(false);
+    it("keeps a listener added before init registered once when it is added again", () => {
       const button = document.createElement("button");
       const listener = vi.fn();
       button.addEventListener("click", listener);
 
-      setWrapCallbacks(true);
+      init();
       button.addEventListener("click", listener);
       button.dispatchEvent(new Event("click"));
       expect(listener).toHaveBeenCalledTimes(1);
@@ -322,63 +307,61 @@ describe("options.errors.wrapCallbacks", () => {
       expect(listener).toHaveBeenCalledTimes(1);
     });
 
-    it("still removes a listener it wrapped after wrapping is turned off or the SDK shuts down", () => {
-      init(true);
+    it("still removes a listener it wrapped after the SDK shuts down", () => {
+      init();
       const button = document.createElement("button");
       const kept = vi.fn();
-      const removedWhileOff = vi.fn();
-      const removedAfterShutdown = vi.fn();
+      const removed = vi.fn();
       button.addEventListener("click", kept);
-      button.addEventListener("click", removedWhileOff);
-      button.addEventListener("click", removedAfterShutdown);
+      button.addEventListener("click", removed);
 
-      setWrapCallbacks(false);
-      // Added again while off: still the one registration.
-      button.addEventListener("click", kept);
-      button.removeEventListener("click", removedWhileOff);
       sdk.logger.manager?.destroy();
-      button.removeEventListener("click", removedAfterShutdown);
+      // Added again after shutdown: still the one registration.
+      button.addEventListener("click", kept);
+      button.removeEventListener("click", removed);
       button.dispatchEvent(new Event("click"));
 
       expect(kept).toHaveBeenCalledTimes(1);
-      expect(removedWhileOff).not.toHaveBeenCalled();
-      expect(removedAfterShutdown).not.toHaveBeenCalled();
+      expect(removed).not.toHaveBeenCalled();
+    });
+
+    it("adds a new listener unwrapped after the SDK shuts down", () => {
+      init();
+      sdk.logger.manager?.destroy();
+      const button = document.createElement("button");
+      const error = new Error("after shutdown");
+      button.addEventListener("click", () => {
+        throw error;
+      });
+
+      expect(() => button.dispatchEvent(new Event("click"))).toThrow(error);
+      hiddenError();
+
+      expect(exceptions()).toHaveLength(0);
     });
   });
 
-  describe("configuration", () => {
-    it("follows updateConfig: off restores the host's timers, on wraps them again", () => {
-      init(true);
+  describe("lifecycle", () => {
+    it("wraps the host's timers while the SDK runs and restores them when it shuts down", () => {
+      init();
       expect(globalThis.setTimeout).not.toBe(hostSetTimeout);
 
-      setWrapCallbacks(false);
+      sdk.logger.manager?.destroy();
       expect(globalThis.setTimeout).toBe(hostSetTimeout);
       const callback = () => undefined;
       setTimeout(callback, HELD);
       expect(held).toEqual([callback]);
-
-      setWrapCallbacks(true);
-      expect(globalThis.setTimeout).not.toBe(hostSetTimeout);
     });
 
-    it("stays on when another errors option is updated", () => {
-      init(true);
-      sdk.updateConfig({ options: { errors: { deduplication: false } } });
-
-      expect(globalThis.setTimeout).not.toBe(hostSetTimeout);
-    });
-
-    it("needs the exceptions listener", () => {
-      init(true, ["dom"]);
-
-      expect(globalThis.setTimeout).toBe(hostSetTimeout);
-    });
-
-    it("restores the host's timers when the SDK shuts down", () => {
-      init(true);
+    it("leaves a callback wrapped before shutdown passing errors through untouched", () => {
+      init();
+      const error = new Error("held over shutdown");
+      setTimeout(() => {
+        throw error;
+      }, HELD);
       sdk.logger.manager?.destroy();
 
-      expect(globalThis.setTimeout).toBe(hostSetTimeout);
+      expect(runHeld()).toBe(error);
     });
   });
 });
