@@ -8,54 +8,17 @@ name: React Native CI
 # main (post-merge), feature-branch work is covered by `pull_request` — so a
 # same-repo PR doesn't fire both a push and a pull_request run.
 #
-# `push` is still path-filtered at the trigger. `pull_request` is NOT, and that
-# asymmetry is deliberate: `RN CI` at the bottom of this file is a REQUIRED
-# status check, and a workflow skipped by a trigger-level path filter creates no
-# check run at all, which blocks the PR forever. So on PRs the workflow always
-# starts, the `changes` job decides whether the lane's work runs, and `gate`
-# always reports. `push` has no check to report, so it keeps the cheaper filter.
-# Full reasoning in .github/actions/changed-paths.
+# Neither trigger is path-filtered. `RN CI` at the bottom of this file is a
+# REQUIRED status check, and a workflow skipped by a trigger-level path filter
+# creates no check run at all, which blocks the PR forever. So the workflow always
+# starts, the `changes` job decides whether the lane's work runs, for pull
+# requests and pushes alike, and `gate` always reports: a job skipped by its
+# `if:` reports success, which satisfies a required check.
 on:
   push:
     branches: [main]
-    paths:
-      - 'packages/react-native/**'
-      # Includes the native engine (packages/core/{swift,kotlin}), which RN ships a
-      # vendored copy of.
-      - 'packages/core/**'
-      - 'scripts/vendor-engine.mjs'
-      # The engine's unit-test steps, shared with flutter.yml.
-      - '.github/actions/engine-tests-kotlin/**'
-      - 'apps/rn-playground/**'
-      - 'tests/e2e/mobile/**'
-      - 'mobilewright.config.ts'
-      - '.github/workflows/react-native.yml'
-      # The classifier that decides whether this lane runs on a PR. It has to be
-      # here as well: without it an action-only commit on main skips the whole
-      # lane, so a change to the very logic gating RN CI would get no post-merge
-      # RN signal at all.
-      - '.github/actions/changed-paths/**'
-      # Root dependency/workspace inputs: every job runs `pnpm install
-      # --frozen-lockfile`, so a change to these can alter what the RN pipeline
-      # builds/tests. Included so the pipeline can't go stale on root-only PRs.
-      - 'package.json'
-      - 'pnpm-lock.yaml'
-      - 'pnpm-workspace.yaml'
-      # Set aside after the includes above, as the `changes` job does.
-      - '!packages/core/**/*.md'
-      - '!tests/e2e/mobile/native-*.sh'
-      - '!tests/e2e/mobile/ci-native-*.sh'
-      #
-      # THIS LIST AND THE `changes` JOB'S PATTERN LIST MUST AGREE. They express
-      # one policy in two syntaxes — globs for the trigger, anchored regexes for
-      # the job — because `push` has no check to report and can still filter at
-      # the trigger, while `pull_request` cannot. A path added to one and not the
-      # other silently changes when the lane runs. flutter.yml, native-ios.yml
-      # and native-android.yml filter `push` too, with the same two lists to keep
-      # in step; web.yml and core.yml are unfiltered on push and so always produce
-      # a post-merge signal.
-  # No `paths:` here on purpose — see the header. The same list lives in the
-  # `changes` job below, which is what actually gates the lane on PRs.
+  # No `paths:` on either trigger, on purpose — see the header. The lane's paths
+  # are the `changes` job's filter.
   pull_request:
   workflow_dispatch:
 
@@ -82,16 +45,14 @@ env:
 jobs:
   # Does this diff touch the RN surface at all?
   #
-  # This is the `pull_request` half of the trigger's `paths:` list, in a job so
-  # the workflow can always run and always report. On `push` the trigger-level
-  # filter does the work, so the action waves it through.
-  # A small job against the macOS and emulator time it can skip.
+  # Decided in a job so the workflow can always run and always report: a small job
+  # against the macOS and emulator time it can skip.
   #
   # Fail-CLOSED, deliberately: a positive list, so an unrecognised path does NOT
   # boot a fleet of macOS runners and three emulators. web.yml's filter is the
-  # mirror image — a negative list, failing open, because there a missed path
-  # costs coverage rather than money. The two lanes want opposite failure
-  # directions; do not "make them consistent".
+  # mirror image — every path less a list of exclusions, failing open, because
+  # there a missed path costs coverage rather than money. The two lanes want
+  # opposite failure directions; do not "make them consistent".
   changes:
     # Distinct per lane: the job name IS the check context, so two lanes both
     # calling this `Changed paths` would render two identical rows in the PR and
@@ -109,60 +70,65 @@ jobs:
     runs-on: blacksmith-16vcpu-ubuntu-2404
     timeout-minutes: 5
     outputs:
-      rn: ${{ steps.filter.outputs.rn }}
+      # 'true' when the filter didn't run: see its `if:`.
+      rn: ${{ steps.filter.outputs.react-native || 'true' }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # paths-filter lists a pull request's files from the API, both sides of any
+      # rename. A push it diffs with git against the commit before it, which needs
+      # the repository.
+      - if: ${{ github.event_name == 'push' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: .github/actions/changed-paths
-      - id: paths
-        uses: ./.github/actions/changed-paths
-      - name: Decide whether the RN lane runs
-        id: filter
-        env:
-          FILES: ${{ steps.paths.outputs.files-path }}
-          IS_PR: ${{ steps.paths.outputs.is-pull-request }}
-        run: |
-          set -euo pipefail
-          if [ "$IS_PR" != 'true' ]; then
-            echo 'not a PR — the trigger already filtered this'
-            echo 'rn=true' >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Keep in sync with the `push` trigger's paths: list above. The root
-          # dependency/workspace inputs are here for the same reason they are
-          # there — every job runs `pnpm install --frozen-lockfile`, so a change
-          # to them alters what this pipeline builds and tests. packages/core is
-          # included because RN aliases it to ../core/ts/src and tsup inlines it,
-          # so a core change is a source change inside the RN bundle. It also holds
-          # the native engine RN vendors (core/swift, core/kotlin) and its unit suites.
-          # Its Markdown, and the native lanes' own scripts in the shared e2e suite,
-          # reach no RN build or test. A temp file rather than a pipe: `grep -q`
-          # exiting early can SIGPIPE the writer, which pipefail reads as no match.
-          grep -vE \
-              -e '^packages/core/.*\.md$' \
-              -e '^tests/e2e/mobile/(ci-)?native-[^/]+\.sh$' \
-              "$FILES" > "$RUNNER_TEMP/rn-files" || true
-          if grep -qE \
-              -e '^packages/react-native/' \
-              -e '^packages/core/' \
-              -e '^scripts/vendor-engine\.mjs$' \
-              -e '^apps/rn-playground/' \
-              -e '^tests/e2e/mobile/' \
-              -e '^mobilewright\.config\.ts$' \
-              -e '^\.github/workflows/react-native\.yml$' \
-              -e '^\.github/actions/changed-paths/' \
-              -e '^\.github/actions/engine-tests-kotlin/' \
-              -e '^package\.json$' \
-              -e '^pnpm-lock\.yaml$' \
-              -e '^pnpm-workspace\.yaml$' \
-              "$RUNNER_TEMP/rn-files"; then
-            echo 'RN-relevant changes found — running the lane'
-            echo 'rn=true' >> "$GITHUB_OUTPUT"
-          else
-            echo 'no RN-relevant changes — skipping the lane'
-            echo 'rn=false' >> "$GITHUB_OUTPUT"
-          fi
+      # Skipped, so the lane runs, when there is no complete list to decide from:
+      # a manual run, or a pull request past the 3000 files GitHub's API lists,
+      # where a list cut short could skip the lane on a change it never saw.
+      - id: filter
+        if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.changed_files < 3000) }}
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          # A file counts when it matches a path below and none of the `!` ones.
+          predicate-quantifier: some-with-excludes
+          filters: |
+            react-native:
+              - 'packages/react-native/**'
+              # RN aliases packages/core to ../core/ts/src and tsup inlines it, so
+              # a core change is a source change inside the RN bundle. It also
+              # holds the native engine RN vendors (core/swift, core/kotlin) and
+              # its unit suites.
+              - 'packages/core/**'
+              - 'scripts/vendor-engine.mjs'
+              - 'apps/rn-playground/**'
+              - 'tests/e2e/mobile/**'
+              - 'mobilewright.config.ts'
+              # The Mobilewright patch the e2e suite runs with.
+              - 'patches/**'
+              # Root dependency and workspace inputs: every job runs `pnpm install
+              # --frozen-lockfile`, so a change to these alters what this lane
+              # builds and tests. .npmrc sets node-linker=hoisted, the flat
+              # node_modules Metro and Expo autolinking need to resolve anything.
+              - 'package.json'
+              - 'pnpm-lock.yaml'
+              - 'pnpm-workspace.yaml'
+              - '.npmrc'
+              # The lane's own definition, and the engine test steps it shares
+              # with flutter.yml and native-android.yml.
+              - '.github/workflows/react-native.yml'
+              - '.github/actions/engine-tests-kotlin/**'
+
+              # Markdown and the licences: nothing this lane builds or runs reads
+              # them.
+              - '!**/*.md'
+              - '!**/LICENSE'
+              # The native lanes' own scripts in the shared e2e suite.
+              - '!tests/e2e/mobile/native-*.sh'
+              - '!tests/e2e/mobile/ci-native-*.sh'
+              # core's tests and the tooling only its own suite reads (Core CI
+              # runs it on every PR). RN's build, typecheck and vitest take core's
+              # source, never its tests.
+              - '!packages/core/ts/**/*.test.ts'
+              - '!packages/core/ts/lint-fixtures/**'
+              - '!packages/core/ts/{eslint.config.mjs,vitest.config.ts,tsconfig.tests.json}'
 
   # The cheapest gate in the pipeline, and therefore the first: static analysis
   # only — eslint plus the two typechecks — with nothing to boot and nothing to

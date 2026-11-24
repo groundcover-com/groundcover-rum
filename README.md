@@ -14,7 +14,7 @@ each package's README is that SDK's reference.
 
 | Package | Platform | Path | Registry | Version | Status |
 | --- | --- | --- | --- | --- | --- |
-| [`@groundcover/browser`](packages/browser) | Web | `packages/browser` | npm (`rc` tag: 2.3.0-rc.0) | 2.2.3 | Stable |
+| [`@groundcover/browser`](packages/browser) | Web | `packages/browser` | npm | 2.3.0 | Stable |
 | [`@groundcover/react-native`](packages/react-native) | React Native (iOS, Android) | `packages/react-native` | npm, `rc` tag | 0.0.1-rc.10 | Release candidate |
 | [`groundcover_rum`](packages/flutter) | Flutter (iOS, Android) | `packages/flutter` | pub.dev | 0.0.1-rc.4 | Release candidate |
 | [`GroundcoverRum`](packages/ios) | iOS (Swift, Objective-C) | `packages/ios` | Swift Package Manager | 0.0.1-rc.3 | Release candidate |
@@ -121,6 +121,10 @@ Each SDK has a lane. The web and mobile lanes look at the paths a change touches
 they need, and always report one gate check named after the lane; `Core CI` is a single job that
 runs in full on every pull request. `Core CI` and `Web CI` run only for pull requests into `main`,
 so a PR stacked on another branch reports them once it is retargeted to `main`.
+
+Which paths run a lane is written once, in the [`dorny/paths-filter`](https://github.com/dorny/paths-filter)
+step of the lane's `changes` job, and holds for pull requests and pushes to `main` alike; only
+`Web CI` runs in full on every push to `main`.
 
 | Workflow | Gate check | Covers |
 | --- | --- | --- |
