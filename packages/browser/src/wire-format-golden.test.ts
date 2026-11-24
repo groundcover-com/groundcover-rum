@@ -200,17 +200,29 @@ describe("wire-format golden contract", () => {
     expect(names).toContain("compressed-probe");
   });
 
-  // Not only the send when the page is hidden: the visitor may leave while any batch is in
-  // flight, and the browser cancels an ordinary request with the page.
-  it("sends a batch sent while the visitor is on the page as a keepalive request too", async () => {
+  // The keepalive budget is shared with the app's own requests, so only the send that must
+  // outlive the page spends it.
+  it("sends only the page-hide batch as a keepalive request", async () => {
     const sdk = initSDK();
     simulatePresence();
 
-    sdk.sendCustomEvent({ event: "keepalive-probe", attributes: {} });
+    // batchSize 0: sent at once, as an ordinary send.
+    sdk.sendCustomEvent({ event: "while-on-page", attributes: {} });
     await drainAsyncSends();
+    // A batch that doesn't fill waits for the page-hide send.
+    sdk.updateConfig({ options: { transport: { batchSize: 10 } } });
+    sdk.sendCustomEvent({ event: "held-until-hide", attributes: {} });
+    hidePage();
+    await drainAsyncSends();
+    showPage();
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]![1]).toMatchObject({ method: "POST", keepalive: true });
+    const calls = recordedCalls(fetchMock);
+    const sends = fetchMock.mock.calls.map((call, index) => ({
+      keepalive: (call[1] as { keepalive?: boolean }).keepalive,
+      names: decodeBody(calls[index]!).events.map((e) => e.attributes?.custom_event_name),
+    }));
+    expect(sends.find((s) => s.names.includes("while-on-page"))?.keepalive).toBeUndefined();
+    expect(sends.find((s) => s.names.includes("held-until-hide"))?.keepalive).toBe(true);
   });
 
   // The core unit test for the retained-buffer candidate INJECTS the pool

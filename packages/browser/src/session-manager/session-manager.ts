@@ -155,7 +155,7 @@ export class SessionManager {
 
     const transporter = new Transporter({
       config: configManager,
-      // fetch, with keepalive for every batch that fits the browsers' limit.
+      // fetch, with keepalive for the send when the page is hidden or left.
       sendBatch: createWebBatchSender(),
       // Browser-only optimization: offload gzip to the Web Worker, falling
       // back to the universal inline path on any worker failure.

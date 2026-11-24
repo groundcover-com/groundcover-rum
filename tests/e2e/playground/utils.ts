@@ -166,9 +166,9 @@ export async function validateRumEvent(
  * as requests go out — combine with `collectedEvents` + `expect.poll` to wait
  * for a specific event across batches (privacy redaction can land in any batch).
  *
- * Each batch is collected once. A request the browser rejects is sent again,
- * with the same bytes, and the playground's default collector isn't running,
- * so every request is rejected and every batch goes out twice. Two different
+ * Each batch is collected once. A page-hide (keepalive) request the browser
+ * rejects is sent again with the same bytes, and the playground's default
+ * collector isn't running, so every such batch goes out twice. Two different
  * batches never have the same bytes: every event has a random id.
  */
 export function collectRumBatches(page: Page): any[] {
