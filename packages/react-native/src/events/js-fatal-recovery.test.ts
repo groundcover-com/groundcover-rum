@@ -32,7 +32,7 @@ function fixture() {
   __setNativeModule(NATIVE_MODULE_NAME, native);
   const send = vi.fn(async (_url: string, _init: RequestInit) => ({ ok: true }));
   vi.stubGlobal("fetch", send);
-  return { host, files, native, send, fatal: () => handler(new Error("startup failure"), true) };
+  return { host, files, native, send, fatal: (error = new Error("startup failure")) => handler(error, true) };
 }
 
 afterEach(() => {
@@ -44,6 +44,29 @@ afterEach(() => {
 });
 
 describe("fatal JS recovery", () => {
+  it("masks secrets in the error name and stack before saving a fatal error", async () => {
+    const { native, fatal } = fixture();
+    groundcover.init({ ...config, options });
+    await __whenReady();
+
+    const error = new Error("startup failure");
+    error.name = "StartupError password=private-name";
+    error.stack = `${error.name}: ${error.message}\n    at start_password=private-function (app.js?password=private-path:12:3)`;
+    fatal(error);
+
+    expect(native.writePendingCrashReport).toHaveBeenCalledOnce();
+    const [, json] = native.writePendingCrashReport.mock.calls[0]!;
+    const saved = JSON.parse(json) as PendingJsFatal<BaseEvent>;
+    expect(saved.event.attributes).toMatchObject({
+      error_type: "StartupError password=[REDACTED]",
+      error_stacktrace: [{
+        "error_stacktrace[0].function": "start_password=[REDACTED]",
+        "error_stacktrace[0].filename": "app.js?password=[REDACTED]",
+      }],
+    });
+    expect(json).not.toMatch(/private-(name|function|path)/);
+  });
+
   it("keeps the accepted startup event through a failed delivery and a successful retry", async () => {
     const { files, fatal, host, native, send } = fixture();
     const enrichEvent = vi.fn((event: CallbackEvent) => ({
