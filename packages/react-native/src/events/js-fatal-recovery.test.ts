@@ -6,7 +6,7 @@ import type { CallbackEvent } from "../config/types";
 import { reportPresence } from "../internal/touch-bridge";
 import { NATIVE_MODULE_NAME, type PendingJsFatal } from "../platform/native-types";
 import { __reset, __setNativeModule } from "../test-utils/react-native-stub";
-import { __resetDrainStateForTest } from "./native-crash-drain";
+import { __resetDrainStateForTest, isCrashDrainActive } from "./native-crash-drain";
 
 const config = { appId: "app", cluster: "test", environment: "test", apiKey: "key", dsn: "ingest.test" };
 const options = { enabledEvents: ["exceptions" as const], transport: { compression: false } };
@@ -173,15 +173,79 @@ describe("fatal JS recovery", () => {
     ]);
   });
 
-  it("counts a repeat of the saved fatal in its file while the file is unsent", async () => {
+  it.each(["read entry", "read", "earlier upload", "upload", "deletion"])("queues a repeat without rewriting the saved file during %s", async stage => {
+    const { fatal, files, native, send, host } = fixture();
+    groundcover.init({ ...config, options });
+    await __whenReady();
+    await vi.waitFor(() => expect(native.getPendingCrashReports).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(isCrashDrainActive()).toBe(false));
+    reportPresence(Date.now());
+
+    const error = new Error("repeating failure");
+    let release!: () => void;
+    const blocked = new Promise<void>(resolve => { release = resolve; });
+    let enter!: () => void;
+    const entered = new Promise<void>(resolve => { enter = resolve; });
+    if (stage === "read" || stage === "read entry") {
+      native.getPendingCrashReports.mockImplementationOnce(async () => {
+        const records = JSON.stringify(Array.from(files.values(), json => JSON.parse(json)));
+        if (stage === "read entry") fatal(error);
+        enter();
+        await blocked;
+        return records;
+      });
+    } else if (stage === "deletion") {
+      native.clearPendingCrashReports.mockImplementationOnce(async ids => {
+        for (const id of ids) files.delete(id);
+        enter();
+        await blocked;
+      });
+    } else {
+      if (stage === "earlier upload") {
+        files.set("earlier", JSON.stringify({
+          id: "earlier", crashEpochMs: Date.now(), errorType: "SIGABRT",
+          sessionSnapshotJson: JSON.stringify({ session_id: "earlier-session" }),
+        }));
+      }
+      send.mockImplementationOnce(async () => {
+        enter();
+        await blocked;
+        return { ok: true };
+      });
+    }
+
+    fatal(error);
+    const [id, json] = native.writePendingCrashReport.mock.calls[0]!;
+    await entered;
+    if (stage !== "read entry") fatal(error);
+    expect(host).toHaveBeenCalledTimes(2);
+    expect(native.writePendingCrashReport).toHaveBeenCalledOnce();
+    expect(files.get(id)).toBe(stage === "deletion" ? undefined : json);
+    const queued = send.mock.calls
+      .map(([, init]) => JSON.parse(strFromU8(init.body as Uint8Array)) as Batch)
+      .flatMap(batch => batch.events)
+      .filter(event => event.id !== id && event.attributes?.error_message === error.message);
+    expect(queued).toHaveLength(1);
+    release();
+    await vi.waitFor(() => expect(isCrashDrainActive()).toBe(false));
+    expect(files.size).toBe(0);
+    expect(native.writePendingCrashReport).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledTimes(stage === "earlier upload" ? 3 : 2);
+  });
+
+  it.each(["read", "upload"])("counts repeats in the saved file after a failed %s finishes", async failure => {
     const { fatal, files, native, send } = fixture();
-    send.mockResolvedValue({ ok: false });
     groundcover.init({ ...config, options: { ...options, enabledEvents: ["exceptions", "logs"] } });
     await __whenReady();
+    await vi.waitFor(() => expect(native.getPendingCrashReports).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(isCrashDrainActive()).toBe(false));
+    if (failure === "read") native.getPendingCrashReports.mockRejectedValueOnce(new Error("read failed"));
+    else send.mockResolvedValue({ ok: false });
     groundcover.logger.info("earlier log");
     const repeating = new Error("repeating failure");
     fatal(repeating);
-    await vi.waitFor(() => expect(send).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(native.getPendingCrashReports).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() => expect(isCrashDrainActive()).toBe(false));
     fatal(repeating);
     fatal(repeating);
     reportPresence(Date.now());
@@ -199,8 +263,8 @@ describe("fatal JS recovery", () => {
       ["log", undefined],
       ["exception", 3],
     ]);
-    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    const [, init] = send.mock.calls[1]!;
+    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(failure === "read" ? 1 : 2));
+    const [, init] = send.mock.calls.at(-1)!;
     const queued = JSON.parse(strFromU8(init.body as Uint8Array)) as Batch;
     expect(queued.events.map(event => event.attributes?.error_message)).toEqual(["other failure"]);
   });

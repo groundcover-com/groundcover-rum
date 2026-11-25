@@ -14,7 +14,7 @@ import {
 } from "@groundcover/rum-core";
 import { reportSafely } from "../../internal/report-safely";
 import type { GroundcoverNativeModule, PendingJsFatal } from "../../platform/native-types";
-import { getUnsentFatal, keepUnsentFatal } from "../native-crash-drain";
+import { getUnsentFatal, isCrashDrainActive, keepUnsentFatal } from "../native-crash-drain";
 import type { RNExtraEventType } from "../rn-event-types";
 import { loadRejectionTracking } from "../../platform/optional-modules";
 
@@ -156,6 +156,7 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
 
   // The unsent copy with one more repeat on its fatal. No record when the file was sent or this is another fatal.
   private recordWithRepeat(saved: { dedup?: DedupInfo }, dedup?: DedupInfo): PendingJsFatal<BaseEvent> | undefined {
+    if (isCrashDrainActive()) return undefined;
     const unsent = getUnsentFatal();
     if (!unsent || dedup === undefined || dedup.key !== saved.dedup?.key) return undefined;
     const fatal = unsent.events.at(-1)!;

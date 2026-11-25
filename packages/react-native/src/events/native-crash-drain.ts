@@ -50,6 +50,7 @@ const DELIVERY_DEADLINE_MS = RN_SEND_TIMEOUT_MS + 5_000;
 // manager) must not start a second pass while the first's requests are still in
 // flight — both would read the same un-acked records and send them twice.
 let drainInFlight: Promise<void> | null = null;
+export const isCrashDrainActive = (): boolean => drainInFlight !== null;
 
 // The copy of the fatal file this run wrote, kept until that file is sent.
 let unsentFatal: PendingJsFatal<BaseEvent> | undefined;
@@ -67,7 +68,8 @@ export interface DrainDeps {
 export function drainNativeCrashReports(deps: DrainDeps): Promise<void> {
   if (drainInFlight) return drainInFlight;
 
-  const run = runDrain(deps)
+  const run = Promise.resolve()
+    .then(() => runDrain(deps))
     .catch(reportSafely)
     .finally(() => {
       drainInFlight = null;
