@@ -54,10 +54,11 @@ function simulatePresence(): void {
   window.dispatchEvent(new Event("pointerdown"));
 }
 
-// The tab is hidden: the SDK's lifecycle flush. showPage undoes it.
+// The tab is hidden: the SDK's lifecycle flush. showPage undoes it. The event bubbles, as the
+// browser's does: the SDK listens on window.
 function hidePage(): void {
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
-  document.dispatchEvent(new Event("visibilitychange"));
+  document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
 }
 
 function showPage(): void {
@@ -199,6 +200,31 @@ describe("wire-format golden contract", () => {
     expect(names).toContain("compressed-probe");
   });
 
+  // The keepalive budget is shared with the app's own requests, so only the send that must
+  // outlive the page spends it.
+  it("sends only the page-hide batch as a keepalive request", async () => {
+    const sdk = initSDK();
+    simulatePresence();
+
+    // batchSize 0: sent at once, as an ordinary send.
+    sdk.sendCustomEvent({ event: "while-on-page", attributes: {} });
+    await drainAsyncSends();
+    // A batch that doesn't fill waits for the page-hide send.
+    sdk.updateConfig({ options: { transport: { batchSize: 10 } } });
+    sdk.sendCustomEvent({ event: "held-until-hide", attributes: {} });
+    hidePage();
+    await drainAsyncSends();
+    showPage();
+
+    const calls = recordedCalls(fetchMock);
+    const sends = fetchMock.mock.calls.map((call, index) => ({
+      keepalive: (call[1] as { keepalive?: boolean }).keepalive,
+      names: decodeBody(calls[index]!).events.map((e) => e.attributes?.custom_event_name),
+    }));
+    expect(sends.find((s) => s.names.includes("while-on-page"))?.keepalive).toBeUndefined();
+    expect(sends.find((s) => s.names.includes("held-until-hide"))?.keepalive).toBe(true);
+  });
+
   // The core unit test for the retained-buffer candidate INJECTS the pool
   // timestamp, which proves the resolver's selection but not the flow. This
   // drives the real thing end to end — start with no cluster so flush()
@@ -317,6 +343,102 @@ describe("wire-format golden contract", () => {
       .map((e) => e.attributes?.custom_event_name);
     expect(names).toContain("pre-presence");
     expect(names).toContain("post-presence");
+  });
+
+  it("sends a session the app was visible for when it is hidden, before presence", async () => {
+    const sdk = initSDK();
+
+    sdk.sendCustomEvent({ event: "pre-presence", attributes: {} });
+    await drainAsyncSends();
+    // Still gated while the app is in use.
+    expect(fetchMock).not.toHaveBeenCalled();
+
+    try {
+      hidePage();
+      await drainAsyncSends();
+
+      // One request: everything held, no exception needed.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      expect(
+        allSentEvents(fetchMock).some(
+          (e) => e.type === "custom" && e.attributes?.custom_event_name === "pre-presence"
+        )
+      ).toBe(true);
+    } finally {
+      showPage();
+    }
+  });
+
+  it("sends a session the app was never visible for when it caught an exception and is hidden, before presence", async () => {
+    try {
+      // Loaded out of sight (a background tab).
+      hidePage();
+      const sdk = initSDK();
+
+      sdk.sendCustomEvent({ event: "pre-presence", attributes: {} });
+      sdk.captureException(new Error("load failed"));
+      await drainAsyncSends();
+      expect(fetchMock).not.toHaveBeenCalled();
+
+      hidePage();
+      await drainAsyncSends();
+
+      // One request: the exception and everything held before it.
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+      const events = allSentEvents(fetchMock);
+      expect(events.some((e) => e.type === "exception")).toBe(true);
+      expect(
+        events.some((e) => e.type === "custom" && e.attributes?.custom_event_name === "pre-presence")
+      ).toBe(true);
+    } finally {
+      showPage();
+    }
+  });
+
+  it("does not send a session the app was never visible for without an exception when it is hidden, before presence", async () => {
+    try {
+      hidePage();
+      const sdk = initSDK();
+
+      sdk.sendCustomEvent({ event: "pre-presence", attributes: {} });
+      hidePage();
+      await drainAsyncSends();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      showPage();
+    }
+  });
+
+  it("does not send a session a rotation started when the app is hidden, before presence", async () => {
+    const SESSION_MAX_DURATION_MS = 60_000;
+    const base = Date.now();
+    let clock = base;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => clock);
+
+    try {
+      const sdk = initSDK({
+        ...BASE_CONFIG,
+        options: { ...BASE_CONFIG.options, sessionMaxDuration: SESSION_MAX_DURATION_MS },
+      });
+      const firstSessionId = sdk.getSessionId();
+
+      // Nobody touches the app. Past the cap, background traffic rotates the session, and the
+      // new one catches an exception.
+      clock = base + SESSION_MAX_DURATION_MS + 1_000;
+      sdk.sendCustomEvent({ event: "background", attributes: {} });
+      sdk.captureException(new Error("poll failed"));
+      await drainAsyncSends();
+      expect(sdk.getSessionId()).not.toBe(firstSessionId);
+
+      hidePage();
+      await drainAsyncSends();
+
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      showPage();
+      nowSpy.mockRestore();
+    }
   });
 
   it("sends nothing when sessionSampleRate is 0", async () => {

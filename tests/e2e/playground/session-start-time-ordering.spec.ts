@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 import PlaygroundPage from "./playground.page";
+import { collectRumBatches } from "./utils";
 
 /**
  * The downstream contract, asserted on the real wire in a real browser: a batch
@@ -49,16 +50,7 @@ test.describe("RUM SDK | session_start_time ordering", () => {
   test("never ships a batch whose session started after an event it carries", async ({ page }) => {
     await page.clock.install({ time: new Date() });
 
-    const batches: Batch[] = [];
-    page.on("request", (request) => {
-      if (request.url().includes("json/rum")) {
-        try {
-          batches.push(JSON.parse(request.postData() || "{}") as Batch);
-        } catch {
-          /* ignore parse errors */
-        }
-      }
-    });
+    const batches: Batch[] = collectRumBatches(page);
 
     await page.goto(process.env.PLAYGROUND_URL || "http://localhost:4173");
     const playgroundPage = new PlaygroundPage(page);

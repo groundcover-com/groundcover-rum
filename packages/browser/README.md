@@ -215,6 +215,10 @@ options: {
 }
 ```
 
+An exception thrown before the visitor first interacts with the page is sent when the page is
+hidden or closed, even if the page was never on screen; see
+[Visits without interaction](#visits-without-interaction).
+
 ### `options.replay`
 
 Session-replay recording controls. **This is noise reduction, not privacy** — to mask sensitive
@@ -546,6 +550,41 @@ move a session's start (the same value also drives the cap and inactivity clocks
 
 This assumes a fully configured SDK, which means `cluster` supplied at `init` — it is required, and
 every other guarantee here is stated for that case.
+
+### Visits without interaction
+
+The SDK sends nothing for a visit until the user first interacts with the page (pointer, key, scroll
+or touch input). When the page is hidden or closed before that (the visitor navigates away,
+reloads, closes the tab or switches to another), the visit is sent, with everything the SDK held for
+it (page load, network requests, logs, errors), if either:
+
+- **The page was visible in the last 30 minutes**, so the visitor could see it. For example, a
+  page that loads slowly and is reloaded or left before it's used, or a tab the visitor switched
+  away from.
+- **It caught a real exception**: an uncaught error, an unhandled rejection or a `captureException`
+  call, even on a page that was never on screen. Error-level logs don't count, and neither do
+  browser messages that say nothing about the app (`Script error.` and the ResizeObserver loop
+  notices); those are still sent with a visit that goes for another reason.
+
+Otherwise the visit is dropped, so tabs opened in the background and closed unseen, pages that
+reload themselves in a background tab, and prerendered pages nobody opened don't become sessions.
+
+- **Nothing is sent while the page is open.** Neither reason counts as an interaction: if the
+  visitor comes back, the rest of the visit is held until they interact, and each time the page is
+  hidden again what arrived since is sent. If that first interaction comes more than 30 minutes
+  after the visit began, it starts a new session (the inactivity gap), and what was held since the
+  page was hidden is dropped.
+- **A tab left in the background for more than 30 minutes** sends nothing more when it's closed,
+  unless it catches a real exception: what it did in the background (polling, logs) isn't part of
+  what the visitor saw.
+- **"Visible"** means the active tab of a window that isn't minimized. It doesn't mean someone was
+  looking: a visit that was visible with nobody there is sent too.
+- **Only the session the visit started with.** A session that begins later in a tab nobody has
+  touched (after `sessionMaxDuration`) is background traffic, and is still dropped.
+- **`setSessionId()` before the first interaction** still drops what the visit held. The session it
+  sets takes the place of the one the visit started with, and is sent by the same rules.
+- **Bots and headless browsers** report their pages as visible, so a crawler that closes its pages
+  normally appears as a session. Filter them with `beforeSend` if you need to.
 
 ### Micro-frontend session synchronization
 

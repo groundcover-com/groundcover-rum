@@ -25,6 +25,7 @@ import {
   makeWebViewProvider,
   getWebDeviceAttributes,
 } from "@/platform/web-platform";
+import { createWebBatchSender } from "@/platform/batch-sender";
 
 // Event types that never trigger an immediate size-based flush on the
 // browser — interactions/navigations ride along with the next flushing event.
@@ -45,7 +46,7 @@ interface CoreHandles {
 // core object (config, session state, pool, transporter, enricher,
 // instrumentation) and wires the browser-specific implementations
 // (sessionStorage, UA device attributes, location view provider, worker-backed
-// encoding, visibilitychange hide-wiring) into them. Everything below this
+// encoding, visibilitychange / pagehide wiring) into them. Everything below this
 // layer takes its collaborators through its constructor, with two deliberate
 // exceptions: the internal debug Logger (ambient console wrapper — injecting
 // it is viral churn for zero platform gain) and the browser-only WorkerClient
@@ -58,23 +59,57 @@ export class SessionManager {
   private hideWired = false;
 
   // App-hide wiring (host-driven — core exposes only the public methods this
-  // calls). Persist the EXACT activity timestamp (steady-state writes are
-  // throttled, so a reload could otherwise read a value up to a minute stale
-  // and gap-rotate that much early), then flush synchronously so the fetch is
-  // queued before the browser can freeze the tab being hidden / closed.
-  private hideHandler = (): void => {
-    // Contained: runs as a document event handler in arbitrary embeds — a
-    // throwing visibilityState read must not leak into the host app.
+  // calls). Both handlers are contained: they run as window event handlers in
+  // arbitrary embeds, and a throw must not leak into the host app.
+  //
+  // On `window`, not `document`: visibilitychange fires at the document and
+  // bubbles to the window, so this runs after every listener on the document,
+  // whenever it was added. What those report as the page hides (web-vitals'
+  // final CLS, INP and LCP; an error thrown in the app's own handler) is then
+  // in the batch this sends instead of left behind in a page about to close.
+  private onVisibilityChange = (): void => {
     try {
       if (typeof document === "undefined" || document.visibilityState !== "hidden") {
         return;
       }
-      this.core?.session.persistLastActivity();
-      this.core?.pool.flush({ lifecycle: true });
+      this.flushOnHide();
     } catch (error) {
       handleError(error);
     }
   };
+
+  // pagehide too: a page already hidden when it unloads (a tab opened in the
+  // background and closed unseen) gets no visibilitychange, and some browsers
+  // have fired none on navigation. Sent whatever the visibility state says,
+  // since the page is going either way. After a visibilitychange send this
+  // sends only what arrived since, if anything.
+  private onPageHide = (): void => {
+    try {
+      this.flushOnHide();
+    } catch (error) {
+      handleError(error);
+    }
+  };
+
+  // Persist the EXACT activity timestamp (steady-state writes are throttled,
+  // so a reload could otherwise read a value up to a minute stale and
+  // gap-rotate that much early), then flush synchronously so the fetch is
+  // queued before the browser can freeze the tab being hidden / closed. That
+  // fetch is a keepalive request when it fits the browsers' 64 KiB keepalive
+  // limit (createWebBatchSender), so it also survives the page being left.
+  private flushOnHide(): void {
+    const core = this.core;
+    if (!core) return;
+    core.session.persistLastActivity();
+    // Replay frames still waiting for their own batch go in with this send.
+    // Guarded on its own: a replay failure must not cost the batch.
+    try {
+      core.instrumentation.flushPendingReplay();
+    } catch (error) {
+      handleError(error);
+    }
+    core.pool.flush({ lifecycle: true });
+  }
 
   constructor(config: SDKConfigInput) {
     this.logger = Logger.initialize({
@@ -120,10 +155,8 @@ export class SessionManager {
 
     const transporter = new Transporter({
       config: configManager,
-      // The browser's network primitive. Resolved at call time rather than
-      // captured, so a host that installs its own fetch after init still sees
-      // it (and so our own network listener can instrument around it).
-      sendBatch: (endpoint, request) => fetch(endpoint, request),
+      // fetch, with keepalive for the send when the page is hidden or left.
+      sendBatch: createWebBatchSender(),
       // Browser-only optimization: offload gzip to the Web Worker, falling
       // back to the universal inline path on any worker failure.
       encodeAsync: (data, enableCompression) =>
@@ -205,20 +238,22 @@ export class SessionManager {
   }
 
   private wireHideHandler(): void {
-    if (this.hideWired || typeof document === "undefined") return;
+    if (this.hideWired || typeof window === "undefined") return;
     this.hideWired = true;
     try {
-      document.addEventListener("visibilitychange", this.hideHandler);
+      window.addEventListener("visibilitychange", this.onVisibilityChange);
+      window.addEventListener("pagehide", this.onPageHide);
     } catch (error) {
       handleError(error);
     }
   }
 
   private unwireHideHandler(): void {
-    if (!this.hideWired || typeof document === "undefined") return;
+    if (!this.hideWired || typeof window === "undefined") return;
     this.hideWired = false;
     try {
-      document.removeEventListener("visibilitychange", this.hideHandler);
+      window.removeEventListener("visibilitychange", this.onVisibilityChange);
+      window.removeEventListener("pagehide", this.onPageHide);
     } catch (error) {
       handleError(error);
     }

@@ -49,6 +49,31 @@ export interface SessionLifecycleDeps<
   // events a platform emits regardless of user action (e.g. periodic
   // recording batches). Platform-owned; pass an empty set if none exist.
   ignoredEventTypes: ReadonlySet<TType>;
+  // Optional exception to the send gate, for the host's lifecycle flushes
+  // (flush({ lifecycle: true })). Given the whole buffer, it decides whether a
+  // session no interaction confirmed sends that buffer on the flush instead of
+  // holding it, so a visit worth keeping (e.g. one that caught an exception
+  // while loading, or one the user could see) isn't lost when the user leaves
+  // without touching anything. It may also read platform state of its own
+  // (the browser: whether the page was visible recently). Every other send
+  // stays gated, the session stays unconfirmed, and nothing it reads counts as
+  // presence.
+  //
+  // Not for a session a rotation started: one that begins with no interaction
+  // (the cap passing in a tab nobody touches) is background traffic, which is
+  // what the gate is for. A session the host sets directly, outside a rotation
+  // (the browser's setSessionId()), keeps the eligibility of the one it
+  // replaces: set before any rotation, it releases like the starting session.
+  //
+  // Each lifecycle flush the platform makes releases, not only suspend. On the
+  // browser the page-hide flush is the only one. React Native also forces one
+  // after a fatal error and after a recovered hang, so adopting this there as
+  // is would release on those too.
+  //
+  // Platform-owned (the browser: the page was visible, or a real exception).
+  // Omitted: the gate has no exception, as on a platform that hasn't adopted
+  // it.
+  releasesOnSuspend?: (events: ReadonlyArray<BaseEvent<TType>>) => boolean;
   hooks?: SessionLifecycleHooks<TRotationContext>;
 }
 
@@ -68,8 +93,13 @@ export class SessionLifecycle<
   private readonly idGenerator: IdGenerator;
   private readonly activityEventTypes: ReadonlySet<TType>;
   private readonly ignoredEventTypes: ReadonlySet<TType>;
+  private readonly releasesOnSuspend: ((events: ReadonlyArray<BaseEvent<TType>>) => boolean) | null;
   private readonly hooks: SessionLifecycleHooks<TRotationContext>;
   private rotating = false;
+  // Whether releasesOnSuspend still applies: true for the session current at
+  // install (and one the host sets in its place), false from the first
+  // rotation on.
+  private releaseEligible = true;
 
   constructor(deps: SessionLifecycleDeps<TRotationContext, TType>) {
     this.session = deps.session;
@@ -77,6 +107,7 @@ export class SessionLifecycle<
     this.idGenerator = deps.idGenerator;
     this.activityEventTypes = deps.activityEventTypes;
     this.ignoredEventTypes = deps.ignoredEventTypes;
+    this.releasesOnSuspend = deps.releasesOnSuspend ?? null;
     this.hooks = deps.hooks ?? {};
   }
 
@@ -86,12 +117,30 @@ export class SessionLifecycle<
 
   // Arm the pool-side observation points. The enqueue hook drives per-event
   // reconciliation; the flush gate holds transmission until the session has
-  // observed genuine presence (the anti-ghost-session rule). Install BEFORE
-  // the host's listeners arm, so the gate is in place before the first
-  // event is captured.
+  // observed genuine presence (the anti-ghost-session rule), except for a
+  // lifecycle flush of the install-time session whose buffer releasesOnSuspend
+  // releases. Install BEFORE the host's listeners arm, so the gate is in place
+  // before the first event is captured.
   install(): void {
     this.pool.setBeforeEnqueueHook((event) => this.reconcileOnEnqueue(event));
-    this.pool.setFlushGate(() => this.session.hasUserActivity());
+    this.pool.setFlushGate(({ lifecycle, events }) =>
+      this.session.hasUserActivity()
+      || (lifecycle && this.releaseEligible && this.releasesBuffer(events))
+    );
+  }
+
+  // Contained HERE rather than left to the pool: the pool fails a throwing gate
+  // OPEN, which for this optional exception would send every unconfirmed
+  // session. A releasesOnSuspend that throws releases nothing, as if omitted.
+  private releasesBuffer(events: ReadonlyArray<BaseEvent<TType>>): boolean {
+    const releases = this.releasesOnSuspend;
+    if (!releases) return false;
+    try {
+      return releases(events) === true;
+    } catch (error) {
+      handleError(error);
+      return false;
+    }
   }
 
   // Teardown ordering is a contract this method OWNS (not a comment callers
@@ -238,6 +287,8 @@ export class SessionLifecycle<
         // paired with the previous session's start time.
         const startNs = this.resolveNewSessionStartTime(options.triggeringEvent);
         this.session.setSessionId(newId);
+        // The new session isn't the one the SDK started with: no release.
+        this.releaseEligible = false;
         // Also resets the activity clock (see SessionState.setSessionStartTime),
         // so a pre-gap lastActivity can't instantly gap-rotate the new session.
         this.session.setSessionStartTime(startNs);

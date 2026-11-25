@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import PlaygroundPage from "./playground.page";
-import { EventType } from "./utils";
+import { EventType, collectRumBatches } from "./utils";
 
 test.describe("Session Replay Performance", () => {
   let playgroundPage: PlaygroundPage;
@@ -26,15 +26,7 @@ test.describe("Session Replay Performance", () => {
     });
 
     // Collect all RUM requests from the start so we don't miss any replay events
-    const rumRequestBodies: any[] = [];
-    page.on("request", (request) => {
-      if (request.url().includes("json/rum")) {
-        try {
-          const body = JSON.parse(request.postData() || "{}");
-          rumRequestBodies.push(body);
-        } catch { /* ignore parse errors */ }
-      }
-    });
+    const rumRequestBodies: any[] = collectRumBatches(page);
 
     // Start session replay recording
     await playgroundPage.startSessionReplay();
