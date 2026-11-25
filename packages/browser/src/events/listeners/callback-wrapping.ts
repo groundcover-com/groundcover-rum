@@ -123,22 +123,22 @@ export function forgetRethrown(value: unknown): boolean {
 // errors stay unreported, as before the wrappers existed: an error is dropped
 // when no frame of its stack, the wrappers' own left out, is in a script the
 // page can see errors from.
+//
+// A stack the engine cut short (Chrome keeps the newest 10 frames) is judged
+// by the frames it kept. When a hidden script's own frames fill it, the error
+// is dropped, even if the app's callback that called into that script was
+// among the frames cut off: the browser hid that error before the wrappers
+// too, since it hides by the script that threw.
 
 /**
  * Whether every frame of the error's stack, the wrappers' own left out, is in
  * a script whose errors the browser hides from the page. An error with a
  * frame anywhere else (the app's code, a script loaded with `crossorigin`, a
- * module), with no stack, or with a stack the engine may have cut short, is
- * reported. Never throws.
+ * module), or with no stack, is reported. Never throws.
  */
 export function fromHiddenScriptsOnly(error: Error): boolean {
   try {
     const stack = parseErrorStack(error);
-    // A stack as long as the engine keeps (Chrome keeps 10 frames) may have
-    // lost its oldest frames, the app's callback among them, so it can't
-    // show the error came only from hidden scripts.
-    const limit = (Error as { stackTraceLimit?: unknown }).stackTraceLimit;
-    if (typeof limit === "number" && stack.length >= limit) return false;
     const wrappers = wrapperSites();
     const files = new Set<string>();
     for (const frame of stack) {

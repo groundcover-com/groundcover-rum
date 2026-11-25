@@ -477,19 +477,49 @@ describe("callback wrapping (errors the browser hides)", () => {
       expect(exceptions()).toHaveLength(1);
     });
 
-    it("reports a third-party-only stack as long as the engine keeps, which may be cut short", () => {
+    it("judges a stack the engine cut short by the frames it kept", () => {
       init();
-      scripts = [script(WIDGET)];
+      scripts = [script(WIDGET), script(appScript())];
       const limit = Error.stackTraceLimit;
       Error.stackTraceLimit = 3;
       try {
         throwFromCallback(errorIn("deep in the widget", WIDGET, WIDGET, WIDGET));
         hiddenError();
+        throwFromCallback(errorIn("the app called the widget", WIDGET, WIDGET, appScript()));
+        hiddenError();
       } finally {
         Error.stackTraceLimit = limit;
       }
 
-      expect(exceptions()).toHaveLength(1);
+      expect(exceptions().map((e) => e.attributes?.error_message)).toEqual(["the app called the widget"]);
+    });
+
+    it("drops a widget error whose own frames fill the stack and cut off the wrapper's", () => {
+      // As the next test, with the widget's callback recursing past the
+      // engine's limit, so neither the callback's nor the wrapper's frame is
+      // kept: every frame left is the widget's.
+      const sdkScript = new URL("/sdk.js", location.href).href;
+      stackRewrite.map = (file) =>
+        file.includes("callback-wrapping.test") ? WIDGET : file.includes("callback-wrapping") ? sdkScript : file;
+      const limit = Error.stackTraceLimit;
+      Error.stackTraceLimit = 4;
+      try {
+        init();
+        scripts = [script(WIDGET)];
+        const recurse = (depth: number): never => {
+          if (depth === 0) throw new Error("deep in the widget");
+          return recurse(depth - 1) as never;
+        };
+        setTimeout(function widgetTick() {
+          recurse(10);
+        }, HELD);
+        runHeld();
+        hiddenError();
+      } finally {
+        Error.stackTraceLimit = limit;
+      }
+
+      expect(exceptions()).toHaveLength(0);
     });
 
     it("leaves the wrappers' own frames out of a real stack", () => {

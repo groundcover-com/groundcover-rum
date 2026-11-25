@@ -669,10 +669,10 @@ and an error is never sent twice. This is part of the `exceptions` listener.
   recognised by its `<script>` tag. An error with your own code anywhere in its stack is reported.
   Some still get through: a script that removes its tag after it runs, a script whose address
   redirects (the stack shows the final address, the tag the first), and code named with
-  `//# sourceURL`. An error your code triggers by calling into such a script is reported, also when
-  the browser cut its stack short, with one exception: Safari leaves out the frame of a callback that
-  ends by returning the call, such as `() => widget.open()`, so that error looks like the script's
-  own and is left out.
+  `//# sourceURL`. An error your code triggers by calling into such a script is reported, except
+  when your frames are missing from its stack, as before `2.3.1`: when the script's own frames fill
+  the stack the browser keeps (Chrome keeps 10), or on Safari, which leaves out the frame of a
+  callback that ends by returning the call, such as `() => widget.open()`.
 - **Load your own scripts with `crossorigin`.** The SDK can't tell your scripts from a third party's,
   so if your bundles come from another origin, such as a CDN or a `static.` subdomain, without
   `crossorigin`, their errors are left out the same way, in every browser. Add
