@@ -82,7 +82,7 @@ type RejectionTrackingModule = { enable?: (options: RejectionOptions) => void; d
 
 export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
   private stopObserving?: () => void;
-  // The first fatal of this run, which got the file. Later fatals get none.
+  // The fatal associated with the saved record.
   private savedFatal?: { dedup?: DedupInfo };
 
   constructor(
@@ -124,6 +124,7 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
   private persistFatal(id: string, fatal: BaseEvent, dedup?: DedupInfo): boolean {
     try {
       if (!this.native?.writePendingCrashReport) return false;
+      if (!getUnsentFatal()) this.savedFatal = undefined;
       const record = this.savedFatal ? this.recordWithRepeat(this.savedFatal, dedup) : this.firstRecord(id, fatal);
       if (!record) return false;
       if (this.native.writePendingCrashReport(record.jsFatalId, JSON.stringify(record)) !== true) return false;
@@ -141,7 +142,7 @@ export class ErrorsEventsListener extends BaseListener<RNExtraEventType> {
     }
   }
 
-  // First fatal of the run: the queued events, then the fatal. No record when there is no session yet.
+  // A new record: the queued events, then the fatal. No record when there is no session yet.
   private firstRecord(id: string, fatal: BaseEvent): PendingJsFatal<BaseEvent> | undefined {
     const session = this.eventsPool.getSessionAttributes();
     if (!session.session_id) return undefined;

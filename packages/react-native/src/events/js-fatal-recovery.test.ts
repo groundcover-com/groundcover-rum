@@ -152,24 +152,24 @@ describe("fatal JS recovery", () => {
     expect(batch.events).toEqual(saved.events);
   });
 
-  it("saves only the first fatal of a run, and queues later fatals once its file was sent", async () => {
+  it.each(["same", "different"])("saves the %s fatal after the previous file was sent", async kind => {
     const { fatal, files, native, send } = fixture();
     groundcover.init({ ...config, options });
     await __whenReady();
-    reportPresence(Date.now());
-    const repeating = new Error("repeating failure");
-    fatal(repeating);
+    const first = new Error("first failure");
+    const next = kind === "same" ? first : new Error("other failure");
+    fatal(first);
     await vi.waitFor(() => expect(files.size).toBe(0));
-    fatal(repeating);
-    fatal(new Error("other failure"));
-    expect(native.writePendingCrashReport).toHaveBeenCalledOnce();
-    // The file carried the first fatal; the queue sends the repeat and the other fatal.
-    await vi.waitFor(() => expect(send).toHaveBeenCalledTimes(3));
+    fatal(next);
+    expect(native.writePendingCrashReport).toHaveBeenCalledTimes(2);
+    const writes = native.writePendingCrashReport.mock.calls;
+    expect(writes[1]![0]).not.toBe(writes[0]![0]);
+    await vi.waitFor(() => expect(files.size).toBe(0));
+    expect(native.clearPendingCrashReports).toHaveBeenCalledTimes(2);
     const sent = send.mock.calls.map(([, init]) => JSON.parse(strFromU8(init.body as Uint8Array)) as Batch);
-    expect(sent.map(batch => batch.events.map(event => event.attributes?.error_message))).toEqual([
-      ["repeating failure"],
-      ["repeating failure"],
-      ["other failure"],
+    expect(sent.map(batch => batch.events.map(event => [event.attributes?.error_message, event.attributes?.error_repeat_count]))).toEqual([
+      [[first.message, undefined]],
+      [[next.message, undefined]],
     ]);
   });
 
