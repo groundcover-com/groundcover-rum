@@ -8,8 +8,9 @@ import { BASE_CONFIG, drainAsyncSends } from "@/test-utils/pipeline";
 // Visits before the first interaction, through the whole browser pipeline against a stubbed
 // fetch. The SDK sends nothing for a session until the user first interacts (the ghost-session
 // gate) and drops what it held if they never do. The exception: hiding or leaving the page
-// sends the session, everything it held included, if the page was visible at some point (the
-// user could see it), or if it caught a real exception (a page that threw in a background tab).
+// sends the session, everything it held included, if the page was visible within the last 30
+// minutes (the user could see it), or if it caught a real exception (a page that threw in a
+// background tab).
 //
 // BASE_CONFIG has batchSize 0 and compression off: every event asks for a send, so the gate is
 // what holds them, and bodies are plain JSON. jsdom reports the page visible. The golden suite
@@ -99,6 +100,63 @@ describe("visits before the first interaction", () => {
 
       expect(fetchMock).toHaveBeenCalledTimes(1);
       expect(sentEvents(fetchMock).some((e) => e.attributes?.custom_event_name === "while_loading")).toBe(true);
+    });
+
+    // The tab the user switched away from, then closed: what it did meanwhile in the background
+    // goes only if they left it recently.
+    describe("then left in the background", () => {
+      const MINUTE_MS = 60 * 1000;
+      let clock: number;
+
+      beforeEach(() => {
+        clock = Date.now();
+        vi.spyOn(Date, "now").mockImplementation(() => clock);
+      });
+
+      async function switchAwayThenCloseAfter(minutes: number): Promise<string[]> {
+        manager = new SessionManager(BASE_CONFIG);
+        manager.sendCustomEvent({ event: "while_visible", attributes: {} });
+        hidePage();
+        await drainAsyncSends();
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+
+        clock += minutes * MINUTE_MS;
+        manager.sendCustomEvent({ event: "background_poll", attributes: {} });
+        window.dispatchEvent(new Event("pagehide"));
+        await drainAsyncSends();
+        return sentEvents(fetchMock).map((e) => e.attributes?.custom_event_name as string);
+      }
+
+      it("closing it within 30 minutes sends what it did in the background", async () => {
+        const names = await switchAwayThenCloseAfter(20);
+
+        expect(names).toEqual(expect.arrayContaining(["while_visible", "background_poll"]));
+      });
+
+      it("closing it after more than 30 minutes sends nothing more", async () => {
+        const names = await switchAwayThenCloseAfter(31);
+
+        expect(fetchMock).toHaveBeenCalledTimes(1);
+        expect(names).toContain("while_visible");
+        expect(names).not.toContain("background_poll");
+      });
+    });
+
+    it("a session the app set with setSessionId() counts as the one the visit started with", async () => {
+      manager = new SessionManager(BASE_CONFIG);
+      manager.sendCustomEvent({ event: "before_set", attributes: {} });
+      await manager.setSessionId("app-session");
+      manager.sendCustomEvent({ event: "after_set", attributes: {} });
+      hidePage();
+      await drainAsyncSends();
+
+      const batches = sentBatches(fetchMock);
+      expect(batches).toHaveLength(1);
+      expect(batches[0]!.sessionAttributes.session_id).toBe("app-session");
+      const names = batches[0]!.events.map((e) => e.attributes?.custom_event_name);
+      // What the visit held before is dropped, as setSessionId() always did before an interaction.
+      expect(names).toContain("after_set");
+      expect(names).not.toContain("before_set");
     });
   });
 

@@ -55,13 +55,15 @@ export interface SessionLifecycleDeps<
   // holding it, so a visit worth keeping (e.g. one that caught an exception
   // while loading, or one the user could see) isn't lost when the user leaves
   // without touching anything. It may also read platform state of its own
-  // (the browser: whether the page was ever visible). Every other send stays
-  // gated, the session stays unconfirmed, and nothing it reads counts as
+  // (the browser: whether the page was visible recently). Every other send
+  // stays gated, the session stays unconfirmed, and nothing it reads counts as
   // presence.
   //
-  // Only the session current when install() ran: a session a later rotation
-  // starts with no interaction (the cap passing in a tab nobody touches) is
-  // background traffic, which is what the gate is for.
+  // Not for a session a rotation started: one that begins with no interaction
+  // (the cap passing in a tab nobody touches) is background traffic, which is
+  // what the gate is for. A session the host sets directly, outside a rotation
+  // (the browser's setSessionId()), keeps the eligibility of the one it
+  // replaces: set before any rotation, it releases like the starting session.
   //
   // Each lifecycle flush the platform makes releases, not only suspend. On the
   // browser the page-hide flush is the only one. React Native also forces one
@@ -95,7 +97,8 @@ export class SessionLifecycle<
   private readonly hooks: SessionLifecycleHooks<TRotationContext>;
   private rotating = false;
   // Whether releasesOnSuspend still applies: true for the session current at
-  // install, false from the first rotation on.
+  // install (and one the host sets in its place), false from the first
+  // rotation on.
   private releaseEligible = true;
 
   constructor(deps: SessionLifecycleDeps<TRotationContext, TType>) {

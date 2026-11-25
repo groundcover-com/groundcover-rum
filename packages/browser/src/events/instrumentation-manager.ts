@@ -22,6 +22,7 @@ import { SessionState } from "@groundcover/rum-core/session/session-state";
 import { SessionLifecycle } from "@groundcover/rum-core/session/session-lifecycle";
 import { BaseEvent } from "@groundcover/rum-core/events/types";
 import { PageVisibilityTracker } from "@/platform/page-visibility";
+import { SESSION_INACTIVITY_TIMEOUT_MS } from "@groundcover/rum-core/config/constants";
 
 // The browser's event-type policy sets, injected into the platform-agnostic
 // SessionLifecycle (core has no defaults — every platform names its own).
@@ -54,14 +55,21 @@ export const isBrowserReleasingEvent = (event: BaseEvent): boolean => {
     || !NON_RELEASING_ERROR_MESSAGES.some((pattern) => pattern.test(message));
 };
 
+// How recently the page must have been visible for a session nobody
+// interacted with to be sent without an exception: the inactivity gap, past
+// which a session would have ended anyway.
+export const RELEASE_VISIBILITY_WINDOW_MS = SESSION_INACTIVITY_TIMEOUT_MS;
+
 // The one exception to the ghost-session gate. When the page is hidden or
 // left, a session nobody interacted with is still sent, with everything it
-// held, if the user could have seen the page (it was visible at some point:
-// the slow load they gave up on and reloaded), or if it caught a real
-// exception (a page that threw in a background tab). A page nobody could see
-// with no real error stays dropped: background tabs closed unseen, pages
-// reloading themselves in the background, prerenders nobody opened. Not
-// presence: it opens only that send, and the session stays unconfirmed.
+// held, if the user could have seen the page (it was visible within the last
+// RELEASE_VISIBILITY_WINDOW_MS: the slow load they gave up on and reloaded,
+// the tab they switched away from), or if it caught a real exception (a page
+// that threw in a background tab). A page nobody could see with no real error
+// stays dropped: background tabs closed unseen, pages reloading themselves in
+// the background, prerenders nobody opened, and a tab seen once and then left
+// in the background longer than the window. Not presence: it opens only that
+// send, and the session stays unconfirmed.
 export function browserReleasesOnSuspend(
   pageWasVisible: () => boolean
 ): (events: ReadonlyArray<BaseEvent>) => boolean {
@@ -104,8 +112,8 @@ export class InstrumentationManager {
   // actual recording may be paused while desired — see syncReplayState().
   private replayDesired = false;
   private presenceMonitor: UserPresenceMonitor | null = null;
-  // Whether the user could have seen the page: one input to the send gate's
-  // exception (browserReleasesOnSuspend).
+  // Whether the user could have seen the page recently: one input to the send
+  // gate's exception (browserReleasesOnSuspend).
   private readonly pageVisibility = new PageVisibilityTracker();
 
   constructor(deps: InstrumentationManagerDeps) {
@@ -129,7 +137,9 @@ export class InstrumentationManager {
       idGenerator: this.idGenerator,
       activityEventTypes: BROWSER_ACTIVITY_EVENT_TYPES,
       ignoredEventTypes: BROWSER_IGNORED_EVENT_TYPES,
-      releasesOnSuspend: browserReleasesOnSuspend(() => this.pageVisibility.wasVisible()),
+      releasesOnSuspend: browserReleasesOnSuspend(() =>
+        this.pageVisibility.wasVisibleWithin(RELEASE_VISIBILITY_WINDOW_MS)
+      ),
       hooks: {
         // An actively-emitting recording IS a presence signal (rrweb only
         // emits on user input / DOM changes) — captured before beforeRotate

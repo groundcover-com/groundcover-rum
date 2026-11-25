@@ -1,5 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { InstrumentationManager, isBrowserReleasingEvent } from "./instrumentation-manager";
+import {
+  InstrumentationManager,
+  isBrowserReleasingEvent,
+  RELEASE_VISIBILITY_WINDOW_MS,
+} from "./instrumentation-manager";
 import { msToNs } from "@groundcover/rum-core/common/global";
 import { ConfigManager } from "@groundcover/rum-core/config/config-manager";
 import { SessionState } from "@groundcover/rum-core/session/session-state";
@@ -683,8 +687,8 @@ describe("InstrumentationManager - ghost-session send gate", () => {
   });
 
   // An unconfirmed session is sent by the page-hide flush only, when the page
-  // was visible or the session caught a real exception (end to end in
-  // errors-before-interaction.test.ts).
+  // was visible within the window or the session caught a real exception (end
+  // to end in errors-before-interaction.test.ts).
   describe("page-hide flush of an unconfirmed session", () => {
     const pageload = { type: "pageload" } as BaseEvent;
     const exception = (message: string) =>
@@ -716,6 +720,18 @@ describe("InstrumentationManager - ghost-session send gate", () => {
       setVisibility("hidden");
       expect(gate({ lifecycle: true, events: [pageload] })).toBe(true);
       expect(gate({ lifecycle: false, events: [pageload] })).toBe(false);
+    });
+
+    it("stops opening it, but for a real exception, once the page has been out of sight longer than the window", () => {
+      const gate = gateStartedWhile("visible");
+      setVisibility("hidden");
+      document.dispatchEvent(new Event("visibilitychange"));
+      expect(gate({ lifecycle: true, events: [pageload] })).toBe(true);
+
+      // Left in the background: the clock moves without running the SDK's timers.
+      vi.setSystemTime(Date.now() + RELEASE_VISIBILITY_WINDOW_MS + 1);
+      expect(gate({ lifecycle: true, events: [pageload] })).toBe(false);
+      expect(gate({ lifecycle: true, events: [pageload, exception("poll failed")] })).toBe(true);
     });
 
     it("for a page never visible, opens it only for a real exception", () => {

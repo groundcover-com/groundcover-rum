@@ -558,8 +558,9 @@ or touch input). When the page is hidden or closed before that (the visitor navi
 reloads, closes the tab or switches to another), the visit is sent, with everything the SDK held for
 it (page load, network requests, logs, errors), if either:
 
-- **The page was visible at some point**, so the visitor could see it. For example, a page that
-  loads slowly and is reloaded or left before it's used.
+- **The page was visible in the last 30 minutes**, so the visitor could see it. For example, a
+  page that loads slowly and is reloaded or left before it's used, or a tab the visitor switched
+  away from.
 - **It caught a real exception**: an uncaught error, an unhandled rejection or a `captureException`
   call, even on a page that was never on screen. Error-level logs don't count, and neither do
   browser messages that say nothing about the app (`Script error.` and the ResizeObserver loop
@@ -573,11 +574,15 @@ reload themselves in a background tab, and prerendered pages nobody opened don't
   hidden again what arrived since is sent. If that first interaction comes more than 30 minutes
   after the visit began, it starts a new session (the inactivity gap), and what was held since the
   page was hidden is dropped.
+- **A tab left in the background for more than 30 minutes** sends nothing more when it's closed,
+  unless it catches a real exception: what it did in the background (polling, logs) isn't part of
+  what the visitor saw.
 - **"Visible"** means the active tab of a window that isn't minimized. It doesn't mean someone was
   looking: a visit that was visible with nobody there is sent too.
 - **Only the session the visit started with.** A session that begins later in a tab nobody has
   touched (after `sessionMaxDuration`) is background traffic, and is still dropped.
-- **`setSessionId()` before the first interaction** still drops what the visit held.
+- **`setSessionId()` before the first interaction** still drops what the visit held. The session it
+  sets takes the place of the one the visit started with, and is sent by the same rules.
 - **Bots and headless browsers** report their pages as visible, so a crawler that closes its pages
   normally appears as a session. Filter them with `beforeSend` if you need to.
 

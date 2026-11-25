@@ -166,19 +166,27 @@ export async function validateRumEvent(
  * as requests go out — combine with `collectedEvents` + `expect.poll` to wait
  * for a specific event across batches (privacy redaction can land in any batch).
  *
- * Each batch is collected once. A page-hide (keepalive) request the browser
- * rejects is sent again with the same bytes, and the playground's default
- * collector isn't running, so every such batch goes out twice. Two different
- * batches never have the same bytes: every event has a random id.
+ * Only the SDK's retry is left out. The playground's default collector isn't
+ * running, so every request fails, and the SDK sends a failed page-hide
+ * (keepalive) request again once, with the same bytes. A request is that retry
+ * when an earlier one with the same bytes has already failed. A batch the SDK
+ * sends twice back to back is seen twice before either fails, so it is still
+ * counted twice. (Answering the requests with page.route instead would avoid
+ * the retry, but in WebKit turning on interception breaks replay's canvas
+ * capture.)
  */
 export function collectRumBatches(page: Page): any[] {
   const batches: any[] = [];
-  const seen = new Set<string>();
+  const failed = new Set<string>();
+  page.on('requestfailed', (request) => {
+    const data = request.url().includes('json/rum') ? request.postData() : null;
+    if (data) failed.add(data);
+  });
   page.on('request', (request) => {
     if (request.url().includes('json/rum')) {
       const data = request.postData();
-      if (data && !seen.has(data)) {
-        seen.add(data);
+      if (data && failed.delete(data)) return;
+      if (data) {
         try {
           batches.push(JSON.parse(data));
         } catch {
