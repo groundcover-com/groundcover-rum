@@ -111,7 +111,7 @@ each SDK instance, and `0.0.1-rc.2` matches `tracing.propagationUrls` against th
 These are breaking changes from `0.0.1-rc.0`:
 
 ```bash
-npm install @groundcover/react-native@0.0.1-rc.10
+npm install @groundcover/react-native@0.0.1-rc.11
 ```
 
 | Change | Migration |

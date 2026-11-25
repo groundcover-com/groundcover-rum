@@ -4,6 +4,15 @@ All notable changes to `@groundcover/react-native` are documented here. This pro
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html) and the
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) format.
 
+## [0.0.1-rc.11] — 2026-11-25
+
+### Fixed
+
+- **Recover fatal JavaScript errors on startup.** On iOS and Android, the SDK saves the crash report
+  together with the events queued before it, including before the first interaction. It sends them
+  under the original session right away when the app keeps running, and after a bundle reload or app
+  restart otherwise.
+
 ## [0.0.1-rc.10] — 2026-11-23
 
 Eleventh release candidate. No API changes from `0.0.1-rc.9`, but two packaging changes can need
