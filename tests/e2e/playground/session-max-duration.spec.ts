@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 import PlaygroundPage from "./playground.page";
-import { EventType } from "./utils";
+import { EventType, collectRumBatches } from "./utils";
 
 /**
  * Drives rotation against the playground's 60s cap with a mocked clock.
@@ -27,16 +27,7 @@ test.describe("RUM SDK | Session max duration", () => {
   test("rotates session id when sessionMaxDuration is exceeded, and resumes replay", async ({ page }) => {
     await page.clock.install({ time: new Date() });
 
-    const requestBodies: any[] = [];
-    page.on("request", (request) => {
-      if (request.url().includes("json/rum")) {
-        try {
-          requestBodies.push(JSON.parse(request.postData() || "{}"));
-        } catch {
-          /* ignore parse errors */
-        }
-      }
-    });
+    const requestBodies: any[] = collectRumBatches(page);
 
     await page.goto(process.env.PLAYGROUND_URL || "http://localhost:4173");
     const playgroundPage = new PlaygroundPage(page);

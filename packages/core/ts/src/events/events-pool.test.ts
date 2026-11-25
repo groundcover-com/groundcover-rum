@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { EventsPool, MAX_GATED_BUFFER_EVENTS } from "./events-pool";
+import { EventsPool, MAX_GATED_BUFFER_EVENTS, type FlushGate } from "./events-pool";
 import type { ConfigManager } from "../config/config-manager";
 import type { SessionState } from "../session/session-state";
 import type { Transporter } from "../transporter/transporter";
@@ -305,6 +305,57 @@ describe("EventsPool", () => {
       expect(mockSend).toHaveBeenCalledWith(
         expect.objectContaining({ events: expect.arrayContaining([mockEvent]) })
       );
+    });
+
+    const sentIds = () =>
+      mockSend.mock.calls.map(([batch]) => (batch as { events: BaseEvent[] }).events.map((e) => e.id));
+
+    // A send that re-enters the pool (a host fetch wrapper that logs): the
+    // event goes in the next batch, not cleared unsent or sent twice.
+    it("an event added from inside the send goes in the next batch", () => {
+      mockSend.mockImplementationOnce(() => {
+        eventsPool.addEvent(createMockEvent({ id: "during-send" }));
+      });
+      eventsPool.addEvent(createMockEvent({ id: "first" }));
+
+      eventsPool.flush({ lifecycle: true });
+      eventsPool.flush();
+
+      expect(sentIds()).toEqual([["first"], ["during-send"]]);
+    });
+
+    it("an event added from inside the send that fills a batch is not sent twice", () => {
+      const config = configManager.getConfig()!;
+      configManager.getConfig.mockReturnValue({
+        ...config,
+        options: { ...config.options, transport: { ...config.options.transport, batchSize: 1 } },
+      });
+      mockSend.mockImplementationOnce(() => {
+        // batchSize 1: this asks for a nested flush.
+        eventsPool.addEvent(createMockEvent({ id: "during-send" }));
+      });
+
+      eventsPool.addEvent(createMockEvent({ id: "first" }));
+
+      expect(sentIds()).toEqual([["first"], ["during-send"]]);
+    });
+
+    it("flushSync: an event added while the send is in flight goes in the next batch", async () => {
+      let finishSend!: () => void;
+      mockSend.mockImplementationOnce(
+        () => new Promise<void>((resolve) => { finishSend = resolve; })
+      );
+      eventsPool.addEvent(createMockEvent({ id: "first" }));
+      // Below batchSize 5: nothing sent yet.
+      expect(mockSend).not.toHaveBeenCalled();
+
+      const sending = eventsPool.flushSync();
+      eventsPool.addEvent(createMockEvent({ id: "in-flight" }));
+      finishSend();
+      await sending;
+      eventsPool.flush();
+
+      expect(sentIds()).toEqual([["first"], ["in-flight"]]);
     });
   });
 
@@ -1278,6 +1329,56 @@ describe("EventsPool", () => {
 
       expect(() => eventsPool.flush()).not.toThrow();
       expect(mockSend).toHaveBeenCalledTimes(1);
+    });
+
+    // The gate is told which kind of send it is asked about and what is
+    // buffered, so a policy can make an exception for the last send before
+    // the host is hidden or torn down (SessionLifecycle.releasesOnSuspend).
+    describe("gate context", () => {
+      it("tells the gate a lifecycle flush is one, and shows it the buffer", () => {
+        const gate = vi.fn<FlushGate>(() => false);
+        eventsPool.setFlushGate(gate);
+        eventsPool.addEvent(createMockEvent({ id: "held" }));
+        gate.mockClear();
+
+        eventsPool.flush({ lifecycle: true });
+
+        expect(gate).toHaveBeenCalledTimes(1);
+        const context = gate.mock.calls[0]![0];
+        expect(context.lifecycle).toBe(true);
+        expect(context.events.map((e) => e.id)).toEqual(["held"]);
+      });
+
+      it("tells the gate every other send is not a lifecycle one", async () => {
+        const gate = vi.fn<FlushGate>(() => false);
+        eventsPool.setFlushGate(gate);
+        // addEvent asks for the buffer cap.
+        eventsPool.addEvent(createMockEvent());
+        eventsPool.flush(); // explicit / batch-size
+        vi.runOnlyPendingTimers(); // heartbeat
+        await eventsPool.flushSync(); // id flip
+
+        expect(gate.mock.calls.length).toBeGreaterThanOrEqual(4);
+        for (const [context] of gate.mock.calls) {
+          expect(context.lifecycle).toBe(false);
+        }
+      });
+
+      it("a gate that opens only for the lifecycle flush sends the whole buffer then", () => {
+        eventsPool.setFlushGate(({ lifecycle }) => lifecycle);
+        eventsPool.addEvent(createMockEvent({ id: "a" }));
+        eventsPool.addEvent(createMockEvent({ id: "b" }));
+
+        eventsPool.flush();
+        vi.runOnlyPendingTimers();
+        expect(mockSend).not.toHaveBeenCalled();
+
+        eventsPool.flush({ lifecycle: true });
+        expect(mockSend).toHaveBeenCalledTimes(1);
+        expect(mockSend.mock.calls[0]![0].events.map((e: { id: string }) => e.id)).toEqual(["a", "b"]);
+        // Sent with the lifecycle encoding, like any lifecycle flush.
+        expect(mockSend.mock.calls[0]![1]).toEqual({ lifecycle: true });
+      });
     });
   });
 

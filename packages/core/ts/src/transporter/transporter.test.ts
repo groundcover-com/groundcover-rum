@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi, MockedFunction } from 'vitest';
-import { AsyncEncoder, Transporter } from './transporter';
+import { AsyncEncoder, BatchSender, Transporter } from './transporter';
 import { Logger } from '../common/logger';
 import { ConfigManager } from '../config/config-manager';
 import { Batch } from '../events/types';
@@ -293,6 +293,21 @@ describe('Transporter', () => {
         'https://test-endpoint.com/json/rum',
         expect.objectContaining({ method: 'POST', body: mockCompressedData }),
       );
+    });
+
+    // So the platform can ask for a request that outlives the page (the
+    // browser's fetch keepalive); every other send reaches it as before.
+    it('tells the sender a lifecycle send is one, and nothing more for any other send', async () => {
+      const sender = vi.fn<BatchSender>().mockResolvedValue({ ok: true });
+      const senderTransporter = new Transporter({ config: asConfigManager(), sendBatch: sender });
+
+      await senderTransporter.send(testBatch, { lifecycle: true });
+      await senderTransporter.send(testBatch);
+
+      expect(sender).toHaveBeenCalledTimes(2);
+      expect(sender.mock.calls[0]).toHaveLength(3);
+      expect(sender.mock.calls[0]![2]).toEqual({ lifecycle: true });
+      expect(sender.mock.calls[1]).toHaveLength(2);
     });
 
     it('routes non-lifecycle sends through the injected async encoder', async () => {

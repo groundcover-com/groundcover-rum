@@ -54,7 +54,21 @@ export interface BatchRequest {
 // so a slow network can't stall a flush. It only attaches handlers: a
 // rejection is logged, and a resolved response with a 401 or 403 `status`
 // warns once (fetch resolves rather than rejects on 4xx and 5xx).
-export type BatchSender = (endpoint: string, request: BatchRequest) => Promise<unknown>;
+//
+// `options` is passed only for a lifecycle send (EventsPool.flush({ lifecycle:
+// true }): the host is hidden or torn down, or forced the send for another
+// reason, such as React Native after a fatal error), so the platform can ask
+// its network layer to let the request outlive the page or process (the
+// browser's fetch `keepalive`). A sender with no such thing ignores it.
+export interface BatchSendOptions {
+  lifecycle: true;
+}
+
+export type BatchSender = (
+  endpoint: string,
+  request: BatchRequest,
+  options?: BatchSendOptions
+) => Promise<unknown>;
 
 export interface TransporterDeps {
   config: ConfigManager;
@@ -97,7 +111,9 @@ export class Transporter {
 
   // `lifecycle: true` skips the async encoder round-trip and compresses inline
   // so the request is queued before the host can suspend or tear down the
-  // process. Set by EventsPool.flush from the platform's suspend handler.
+  // process. Set by EventsPool.flush({ lifecycle: true }), which the platform
+  // calls when it suspends (and React Native also after a fatal error or a
+  // recovered hang).
   async send<TType extends string = string>(
     batch: Batch<TType>,
     { lifecycle = false }: { lifecycle?: boolean } = {}
@@ -133,11 +149,12 @@ export class Transporter {
         "Content-Encoding": isCompressed ? "gzip" : "",
       };
 
-      this.sendBatch(endpoint, {
-        method: "POST",
-        headers,
-        body: finalData,
-      })
+      const request: BatchRequest = { method: "POST", headers, body: finalData };
+      // The third argument only on the lifecycle path (as flush() passes
+      // { lifecycle } here): an ordinary send reaches the sender as it always has.
+      (lifecycle
+        ? this.sendBatch(endpoint, request, { lifecycle: true })
+        : this.sendBatch(endpoint, request))
         .then(response => this.warnIfKeyRefused(response, endpoint))
         .catch(error => {
           this.logger.log("Network error while sending batch:", error, { groundcoverIgnore: true });

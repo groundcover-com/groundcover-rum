@@ -66,7 +66,7 @@ async function runErrorLoop(page: Page): Promise<void> {
 async function hidePage(page: Page): Promise<void> {
   await page.evaluate(() => {
     Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
-    document.dispatchEvent(new Event("visibilitychange"));
+    document.dispatchEvent(new Event("visibilitychange", { bubbles: true }));
   });
 }
 
