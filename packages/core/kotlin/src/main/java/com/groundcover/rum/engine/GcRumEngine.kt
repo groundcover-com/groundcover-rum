@@ -358,6 +358,8 @@ internal class GcRumEngine(
         }
     }
 
+    fun writePendingCrashReport(id: String, json: String): Boolean = snapshots.writePendingRecord(id, json)
+
     fun pendingCrashReportsJson(): String {
         // Records are already JSON objects; splicing them avoids a decode/encode
         // round-trip whose only job would be to produce the same bytes.

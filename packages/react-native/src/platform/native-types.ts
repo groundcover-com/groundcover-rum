@@ -1,7 +1,7 @@
 // The JS side of the contract with the native engines. Everything crosses the bridge as
 // JSON STRINGS rather than ReadableMap/NSDictionary: one codec per side, no per-field
 // marshalling drift, and the same bytes can be persisted natively and replayed in a test.
-// Every call is init-time or fire-and-forget, so stringify never lands on a hot path.
+// Fatal JS capture waits synchronously for the native writer.
 //
 // WHAT ACTUALLY ENFORCES THIS CONTRACT:
 //
@@ -30,6 +30,15 @@ export type NativeStackFrame = {
   /** 0 for native frames — line info needs server-side symbolication. */
   lineno: number;
   colno: number;
+};
+
+// Older bundles only drain records with a top-level id. They leave these files for a
+// compatible reader instead of acknowledging them as native crashes during an OTA rollback.
+export type PendingJsFatal<TEvent = unknown> = {
+  jsFatalId: string;
+  /** The events that were queued when the fatal was captured, then the fatal itself. */
+  events: TEvent[];
+  sessionSnapshotJson: string | null;
 };
 
 /**
@@ -278,7 +287,8 @@ export type NativeSignalKind = NativeSignal["kind"];
 export type GroundcoverNativeModule = {
   nativeInit(configJson: string): Promise<string>;
   updateSessionSnapshot(snapshotJson: string | null): void;
-  /** JSON array of `PendingCrashRecord`. Read-only — records survive until acked. */
+  writePendingCrashReport?(id: string, json: string): boolean;
+  /** Reads pending native crashes and fatal JS errors as a JSON array. Records survive until acked. */
   getPendingCrashReports(): Promise<string>;
   clearPendingCrashReports(ids: string[]): Promise<void>;
   /**

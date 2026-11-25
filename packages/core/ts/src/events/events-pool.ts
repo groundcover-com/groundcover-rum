@@ -168,6 +168,12 @@ export class EventsPool<TType extends string = string> {
     this.clearBuffer();
   }
 
+  // The buffered events as flush() would send them. With discardBuffer(), a host
+  // can move the batch to durable storage instead of sending it.
+  getPendingEvents(): BaseEvent<TType>[] {
+    return this.pending.toSend();
+  }
+
   // Every place the buffer is emptied goes through here.
   private clearBuffer(): void {
     this.pending = this.newBatch();
@@ -201,7 +207,10 @@ export class EventsPool<TType extends string = string> {
     }
   }
 
-  addEvent(event: DedupeableEvent<TType> | null): void {
+  addEvent(
+    event: DedupeableEvent<TType> | null,
+    persist?: (accepted: BaseEvent<TType>) => boolean
+  ): void {
     if (!event || !this.initialized) return;
 
     try {
@@ -269,6 +278,10 @@ export class EventsPool<TType extends string = string> {
           handleError(error);
         }
       }
+
+      // A fatal can be committed to disk here, after host hooks and session rotation.
+      // A failed write falls through with the same accepted event.
+      if (persist?.(outgoing)) return;
 
       // Buffered, or, for a repeat of an exception or error-level log already in
       // this batch, counted on that event (error deduplication). After the

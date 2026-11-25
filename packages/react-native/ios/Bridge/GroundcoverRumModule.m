@@ -19,6 +19,8 @@ RCT_EXTERN_METHOD(nativeInit
 
 RCT_EXTERN_METHOD(updateSessionSnapshot : (nullable NSString *)snapshotJson)
 
+RCT_EXTERN__BLOCKING_SYNCHRONOUS_METHOD(writePendingCrashReport : (NSString *)recordId json : (NSString *)json)
+
 RCT_EXTERN_METHOD(getPendingCrashReports
                   : (RCTPromiseResolveBlock)resolve rejecter
                   : (RCTPromiseRejectBlock)reject)

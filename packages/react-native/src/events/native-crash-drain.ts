@@ -7,12 +7,13 @@ import {
   Transporter,
   truncate,
   type ConfigManager,
+  type BaseEvent,
   type ErrorEventAttributes,
   type IdGenerator,
 } from "@groundcover/rum-core";
 
 import type { RNEventType } from "./rn-event-types";
-import type { GroundcoverNativeModule, PendingCrashRecord } from "../platform/native-types";
+import type { GroundcoverNativeModule, PendingCrashRecord, PendingJsFatal } from "../platform/native-types";
 import { clearPendingCrashReports, readPendingCrashReports } from "../platform/native-bridge";
 import type { SessionSnapshot } from "../platform/session-snapshot";
 import { createRnBatchSender, RN_SEND_TIMEOUT_MS } from "../internal/rn-batch-sender";
@@ -26,6 +27,9 @@ import { reportSafely } from "../internal/report-safely";
 // session is over, and its sessionAttributes are not the ones this run would stamp — so
 // the drain bypasses EventsPool and sends each report as its own batch, built from the
 // snapshot native persisted at crash time. The current session's id never touches these.
+//
+// It also runs right after a fatal JS error is saved, so an app that keeps running sends
+// that record in the same run instead of holding it until the next start.
 //
 // At-least-once: native keeps a record until JS confirms the POST, and `crash_report_id`
 // is stable across redeliveries, so a duplicate can be recognised. Losing a fatal is far
@@ -46,6 +50,14 @@ const DELIVERY_DEADLINE_MS = RN_SEND_TIMEOUT_MS + 5_000;
 // manager) must not start a second pass while the first's requests are still in
 // flight — both would read the same un-acked records and send them twice.
 let drainInFlight: Promise<void> | null = null;
+export const isCrashDrainActive = (): boolean => drainInFlight !== null;
+
+// The copy of the fatal file this run wrote, kept until that file is sent.
+let unsentFatal: PendingJsFatal<BaseEvent> | undefined;
+export const getUnsentFatal = (): PendingJsFatal<BaseEvent> | undefined => unsentFatal;
+export const keepUnsentFatal = (record: PendingJsFatal<BaseEvent>): void => {
+  unsentFatal = record;
+};
 
 export interface DrainDeps {
   config: ConfigManager;
@@ -56,7 +68,8 @@ export interface DrainDeps {
 export function drainNativeCrashReports(deps: DrainDeps): Promise<void> {
   if (drainInFlight) return drainInFlight;
 
-  const run = runDrain(deps)
+  const run = Promise.resolve()
+    .then(() => runDrain(deps))
     .catch(reportSafely)
     .finally(() => {
       drainInFlight = null;
@@ -69,6 +82,7 @@ export function drainNativeCrashReports(deps: DrainDeps): Promise<void> {
  *  be able to reset it between cases. */
 export function __resetDrainStateForTest(): void {
   drainInFlight = null;
+  unsentFatal = undefined;
 }
 
 async function runDrain(deps: DrainDeps): Promise<void> {
@@ -78,7 +92,11 @@ async function runDrain(deps: DrainDeps): Promise<void> {
   for (const record of records) {
     try {
       const acked = await reportOne(record, deps);
-      if (acked) await clearPendingCrashReports(deps.native, [record.id]);
+      if (acked) {
+        const id = "jsFatalId" in record ? record.jsFatalId : record.id;
+        await clearPendingCrashReports(deps.native, [id]);
+        if (unsentFatal?.jsFatalId === id) unsentFatal = undefined;
+      }
     } catch (error) {
       // Leave the record un-acked: whatever went wrong here, the next launch
       // gets another attempt.
@@ -92,7 +110,7 @@ async function runDrain(deps: DrainDeps): Promise<void> {
 }
 
 /** @returns whether the record should be acked (delivered, or unsalvageable). */
-async function reportOne(record: PendingCrashRecord, deps: DrainDeps): Promise<boolean> {
+async function reportOne(record: PendingCrashRecord | PendingJsFatal, deps: DrainDeps): Promise<boolean> {
   const snapshot = parseSnapshot(record.sessionSnapshotJson);
   if (!snapshot) {
     // No envelope means no session to attribute this to. Sending it under the
@@ -102,6 +120,12 @@ async function reportOne(record: PendingCrashRecord, deps: DrainDeps): Promise<b
   }
 
   const { screen, ...sessionAttributes } = snapshot;
+
+  if ("jsFatalId" in record) {
+    const events = record.events.filter(isUsableEvent) as BaseEvent[];
+    if (!events.length) return true;
+    return sendUnderSnapshot({ deps, sessionAttributes, events });
+  }
 
   // A local enricher so the crash-time screen is stamped nested (like every
   // other event's `screen`), rather than dot-flattened as a plain attribute.
@@ -162,7 +186,7 @@ async function reportOne(record: PendingCrashRecord, deps: DrainDeps): Promise<b
     if (enriched.ok && isUsableEvent(enriched.value)) event = enriched.value as typeof event;
   }
 
-  return sendUnderSnapshot({ deps, sessionAttributes, event });
+  return sendUnderSnapshot({ deps, sessionAttributes, events: [event] });
 }
 
 /**
@@ -268,9 +292,9 @@ function buildAttributes(
 async function sendUnderSnapshot(args: {
   deps: DrainDeps;
   sessionAttributes: Record<string, unknown>;
-  event: ReturnType<EventEnricher["enrich"]>;
+  events: Array<ReturnType<EventEnricher["enrich"]>>;
 }): Promise<boolean> {
-  const { deps, sessionAttributes, event } = args;
+  const { deps, sessionAttributes, events } = args;
 
   let settle: (delivered: boolean) => void = () => {};
   const delivered = new Promise<boolean>((resolve) => {
@@ -289,7 +313,7 @@ async function sendUnderSnapshot(args: {
     {
       // The crashed session's envelope, verbatim — never the current one's.
       sessionAttributes: sessionAttributes as never,
-      events: [event],
+      events,
     },
     // Inline encode: RN has no worker, and this path should not wait on one.
     { lifecycle: true }

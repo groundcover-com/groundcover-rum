@@ -63,6 +63,7 @@ export class RNSessionManager {
   private core: CoreHandles | null = null;
   private appStateSub: NativeEventSubscription | null = null;
   private native: GroundcoverNativeModule | null = null;
+  private nativeReady: Promise<void> = Promise.resolve();
   // App-background wiring, the RN analogue of the browser's visibilitychange
   // hide handler. On any leave-foreground transition persist the exact activity
   // timestamp (steady-state writes are throttled). But FLUSH only on "background"
@@ -207,6 +208,8 @@ export class RNSessionManager {
       // A rotation mints a new session id — native's copy has to follow it.
       onSessionIdentityChanged: () => snapshots.push(),
       nativeModule: this.native,
+      // An app that survives the fatal sends the saved record now, not at its next start.
+      onFatalSaved: () => this.drainCrashesAfterHarvest(configManager, this.nativeReady),
     });
 
     // Everything past here arms live resources; `core` is assigned LAST so a
@@ -226,7 +229,8 @@ export class RNSessionManager {
       // Only now can the envelope be read — and only after `core` is live, so a
       // teardown from a failed startup never leaves native holding a snapshot
       // for a session that does not exist.
-      this.drainCrashesAfterHarvest(configManager, this.armNative(configManager, true));
+      this.nativeReady = this.armNative(configManager, true);
+      this.drainCrashesAfterHarvest(configManager, this.nativeReady);
       snapshots.push();
     } catch (error) {
       this.logger.log("[rn-session-manager] init failed — tearing down partial startup:", error);
@@ -352,8 +356,8 @@ export class RNSessionManager {
    * ship. Each report goes under the envelope native persisted at crash time.
    *
    * Regardless of `enabledEvents` too, for the same reason one gate up: config gates CAPTURE, not
-   * delivery. A pending record can only exist because a launch with `crashes` enabled wrote it, so
-   * every one was captured under consent; turning the feature off means stop capturing, and
+   * delivery. Native crashes and JS fatals were gated by their respective capture settings.
+   * Turning a feature off means stop capturing, and
    * refusing to ship what is already on disk would make a config change silently lose a fatal —
    * it would sit there until the record cap evicted it. Capture stays off: `armNative` still sends
    * `crashes: false`, so no handler is installed for a host that opted out.
@@ -427,6 +431,10 @@ export class RNSessionManager {
 
   sendCustomEvent(event: { event: string; attributes: Record<string, unknown> }): void {
     this.core?.instrumentation.sendCustomEvent(event);
+  }
+
+  captureStartupFatal(error: unknown, atMs: number): void {
+    this.core?.instrumentation.captureStartupFatal(error, atMs);
   }
 
   captureException(error: unknown, metadata?: Record<string, unknown>): void {

@@ -2,6 +2,7 @@ import { Logger, type UserIdentifiers } from "@groundcover/rum-core";
 import { reportSafely } from "./internal/report-safely";
 
 import { RNSessionManager } from "./session-manager/session-manager";
+import { observeGlobalErrors } from "./events/listeners/errors-events-listener";
 import { HydratedStorage } from "./platform/hydrated-storage";
 import { RNLogger } from "./logger/logger";
 import { clearTouchHistory, setTouchHandlers } from "./internal/touch-bridge";
@@ -144,7 +145,20 @@ async function runInit(params: InitParams, appId: string): Promise<void> {
       storage: params.storage,
     };
     Logger.initialize({ debug: !!config.options?.debug, prefix: "[groundcover]" });
-    const storage = await HydratedStorage.hydrate(config.storage);
+    const enabled = config.options?.enabledEvents;
+    const stopObserving = !enabled?.length || enabled.includes("exceptions")
+      ? observeGlobalErrors((error, fatal) => {
+          if (!fatal) return;
+          const atMs = Date.now();
+          delegateOrBuffer("captureStartupFatal", sdk => sdk.captureStartupFatal(error, atMs));
+        })
+      : undefined;
+    let storage;
+    try {
+      storage = await HydratedStorage.hydrate(config.storage);
+    } finally {
+      stopObserving?.();
+    }
     const next = new RNSessionManager(config, storage);
 
     manager = next;
