@@ -12,18 +12,30 @@ import {
   className,
   coerceToError,
 } from "@groundcover/rum-core/events/errors/coerce-error";
+import {
+  disableCallbackWrapping,
+  enableCallbackWrapping,
+  forgetRethrown,
+  fromHiddenScriptsOnly,
+  takeLastRethrown,
+} from "./callback-wrapping";
 
 // Uncaught errors and unhandled rejections from the window listeners, and
 // whatever the app passes to captureException. The two entries stay apart:
 // the listeners report only real error and rejection events, while
-// captureException accepts any value.
+// captureException accepts any value. While live, the app's timer, animation
+// frame and listener callbacks are wrapped, so an error the browser hides can
+// still be reported (see callback-wrapping.ts).
 export class ErrorsEventsListener extends BaseListener {
   initialize() {
     _globalThis?.addEventListener("error", this.handleEvent);
     _globalThis?.addEventListener("unhandledrejection", this.handleEvent);
+    // After the window listeners above, so they aren't wrapped themselves.
+    enableCallbackWrapping(this);
   }
 
   destroy() {
+    disableCallbackWrapping(this);
     _globalThis?.removeEventListener("error", this.handleEvent);
     _globalThis?.removeEventListener("unhandledrejection", this.handleEvent);
   }
@@ -33,7 +45,7 @@ export class ErrorsEventsListener extends BaseListener {
 
     try {
       const error = isErrorEvent(event)
-        ? errorFromErrorEvent(event)
+        ? errorFromWindowError(event)
         : event.type === "unhandledrejection"
           ? errorFromRejectionEvent(event)
           : null;
@@ -93,10 +105,45 @@ function isEvent(value: unknown): value is Event {
 function errorFromErrorEvent(event: ErrorEvent): Error | null {
   const thrown: unknown = event.error;
   if (thrown == null) {
-    const message = event.message || "";
-    if (/^Script error\.?$/.test(message)) return null;
-    return atThrowSite(new Error(message || "Unknown error"), event);
+    if (isHiddenError(event)) return null;
+    return atThrowSite(new Error(event.message || "Unknown error"), event);
   }
+  return errorFromThrown(thrown, event);
+}
+
+// What the window "error" listener reports. An error the browser hid is
+// reported as the value a callback wrapper caught and rethrew, or that
+// reportError was given, just before the event (see callback-wrapping.ts);
+// with no such value, a hidden error is still dropped. A value that came
+// through a wrapper is dropped when it comes only from scripts whose errors
+// the browser hides from the page (third-party scripts loaded without CORS):
+// the browser hid those before the wrappers existed, in every browser.
+function errorFromWindowError(event: ErrorEvent): Error | null {
+  if (event.error == null && isHiddenError(event)) {
+    const recovered = takeLastRethrown();
+    return recovered ? errorFromWrapped(recovered.value) : null;
+  }
+  if (forgetRethrown(event.error)) {
+    return errorFromWrapped(event.error, event.message);
+  }
+  return errorFromErrorEvent(event);
+}
+
+// A value a wrapper caught. The event's location is where the wrapper
+// rethrew it, inside the SDK, so a value without a stack of its own gets no
+// frame instead of that one. `message` is the browser's text for a thrown
+// null or undefined, which has nothing else to show.
+function errorFromWrapped(thrown: unknown, message?: string): Error | null {
+  const error = thrown == null && message ? new Error(message) : coerceToError(thrown);
+  if (error !== thrown && !hasStack(thrown)) error.stack = "";
+  return fromHiddenScriptsOnly(error) ? null : error;
+}
+
+function isHiddenError(event: ErrorEvent): boolean {
+  return /^Script error\.?$/.test(event.message || "");
+}
+
+function errorFromThrown(thrown: unknown, event: ErrorEvent): Error {
   const error = coerceToError(thrown);
   // The SDK built this Error, so its own stack would point into the SDK.
   // Use the throw site instead, unless the thrown value brought a stack.
