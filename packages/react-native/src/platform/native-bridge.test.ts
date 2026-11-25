@@ -320,7 +320,8 @@ describe("readPendingCrashReports", () => {
     });
 
     const [parsed] = await readPendingCrashReports(mod);
-    const kept = (parsed!.metadata as { causes: unknown[] }).causes;
+    if (!parsed || !("metadata" in parsed)) throw new Error("Expected native crash");
+    const kept = (parsed.metadata as { causes: unknown[] }).causes;
     expect(kept).toHaveLength(20);
     // Oldest-first: the chain's HEAD is the wrapper that was actually thrown, and the frames
     // above only describe it — truncating from the front would drop the exception the app saw.
@@ -398,7 +399,8 @@ describe("readPendingCrashReports", () => {
 
     // Serialized as null on the way out, so it lands as the NaN that makes the
     // drain fall back — never as Infinity.
-    expect(Number.isNaN(read!.crashEpochMs)).toBe(true);
+    if (!read || !("crashEpochMs" in read)) throw new Error("Expected native crash");
+    expect(Number.isNaN(read.crashEpochMs)).toBe(true);
   });
 
   it("returns an empty list rather than throwing on a corrupt payload", async () => {

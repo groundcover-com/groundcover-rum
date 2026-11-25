@@ -15,7 +15,7 @@ enum GCRumCrashReportMapper {
     /// - Parameters:
     ///   - report: a parsed KSCrash report (its on-disk format is plain JSON).
     ///   - sessionSnapshotJson: the envelope the crashed run last pushed.
-    /// - Returns: the record JSON, or nil when the report is unusable.
+    /// - Returns: the record JSON, or nil for an unusable report or a React Native JS rethrow.
     static func buildRecord(
         report: [String: Any],
         sessionSnapshotJson: String?
@@ -24,6 +24,11 @@ enum GCRumCrashReportMapper {
 
         let crash = report["crash"] as? [String: Any] ?? [:]
         let error = crash["error"] as? [String: Any] ?? [:]
+        if let exception = error["nsexception"] as? [String: Any],
+           let name = exception["name"] as? String,
+           name.hasPrefix("RCTFatalException: Unhandled JS Exception: ") {
+            return nil
+        }
 
         var record: [String: Any] = [
             "id": id,

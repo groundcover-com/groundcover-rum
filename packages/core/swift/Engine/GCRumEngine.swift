@@ -250,6 +250,10 @@ final class GCRumEngine {
         }
     }
 
+    func writePendingCrashReport(_ id: String, json: String) -> Bool {
+        snapshots.writePendingRecord(id: id, json: json)
+    }
+
     func pendingCrashReportsJson() -> String {
         let records = snapshots.readPendingRecords()
         // Records are already JSON objects; splicing them avoids a decode/encode

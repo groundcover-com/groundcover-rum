@@ -5,10 +5,9 @@ import React
 /// here — everything the bridge does is marshalling, so the engine stays usable
 /// without React Native.
 ///
-/// A classic RCTEventEmitter rather than a TurboModule: every call is init-time
-/// or fire-and-forget, and the new-architecture interop layer (guaranteed by our
-/// react-native >= 0.74 peer, bridgeless included) makes codegen pure overhead
-/// here.
+/// A classic RCTEventEmitter rather than a TurboModule: the new-architecture
+/// interop layer (guaranteed by our react-native >= 0.74 peer, bridgeless included)
+/// makes codegen pure overhead here.
 @objc(GroundcoverRumModule)
 final class GroundcoverRumModule: RCTEventEmitter, GCRumEngineDelegate {
     private let engine = GCRumEngine()
@@ -109,6 +108,11 @@ final class GroundcoverRumModule: RCTEventEmitter, GCRumEngineDelegate {
     @objc(updateSessionSnapshot:)
     func updateSessionSnapshot(_ snapshotJson: String?) {
         engine.updateSessionSnapshot(snapshotJson)
+    }
+
+    @objc(writePendingCrashReport:json:)
+    func writePendingCrashReport(_ id: String, json: String) -> NSNumber {
+        NSNumber(value: engine.writePendingCrashReport(id, json: json))
     }
 
     @objc(getPendingCrashReports:rejecter:)

@@ -208,11 +208,19 @@ struct GCRumSessionSnapshotStoreTests {
     func recordSurvivesAcrossStores() {
         let directory = makeTempDirectory()
 
-        GCRumSessionSnapshotStore(directory: directory)
-            .writePendingRecord(id: "crash-1", json: #"{"id":"crash-1"}"#)
+        let store = GCRumSessionSnapshotStore(directory: directory)
+        #expect(store.writePendingRecord(id: "crash-1", json: #"{"id":"crash-1"}"#))
 
         let records = GCRumSessionSnapshotStore(directory: directory).readPendingRecords()
         #expect(records == [#"{"id":"crash-1"}"#])
+    }
+
+    @Test("a pending write reports a filesystem failure")
+    func pendingWriteFailure() throws {
+        let directory = makeTempDirectory()
+        let store = GCRumSessionSnapshotStore(directory: directory)
+        try FileManager.default.removeItem(at: directory.appendingPathComponent("pending"))
+        #expect(!store.writePendingRecord(id: "crash-1", json: "{}"))
     }
 
     /// Delivery is at-least-once: a record stays until JavaScript acks it, and
